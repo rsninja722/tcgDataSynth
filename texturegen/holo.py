@@ -49,17 +49,19 @@ def pattern_smooth(w: int, h: int) -> np.ndarray:
 
 
 def pattern_horizontal_lines(w: int, h: int, period_px: int = 6) -> np.ndarray:
-    """Horizontal stripes (sinusoidal so they read as fine foil lines)."""
+    """Horizontal stripes (sinusoidal foil lines). Amplitude reduced ~30% (0.5->0.35)
+    so the lines are less intense."""
     yy = np.arange(h, dtype=np.float32).reshape(-1, 1)
-    line = (0.5 + 0.5 * np.sin(2.0 * np.pi * yy / max(2, period_px)))
+    line = (0.5 + 0.35 * np.sin(2.0 * np.pi * yy / max(2, period_px)))
     return (np.tile(line, (1, w)) * 255.0).astype(np.uint8)
 
 
 def pattern_cosmos(w: int, h: int, seed: int = 0) -> np.ndarray:
     """'Cosmos' holo: many different-sized soft circles + additional smaller
-    PIXELATED (aliased) circles over a faint cloudy base."""
+    PIXELATED (aliased) circles over a FLAT non-holographic base (no noise/pattern,
+    so only the circles read as holo)."""
     rng = np.random.default_rng(seed)
-    img = 0.25 + 0.2 * _smooth_noise(h, w, 24, rng)     # faint cloud base
+    img = np.zeros((h, w), np.float32)                  # flat, non-holographic base
     area = w * h
     # Big soft circles, varied sizes.
     for _ in range(area // 2200):
@@ -84,9 +86,9 @@ def pattern_water_web(w: int, h: int, seed: int = 0) -> np.ndarray:
     base = cv2.remap(base, (xx + warp).astype(np.float32), (yy + warp).astype(np.float32),
                      cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
     web = 1.0 - np.abs(2.0 * base - 1.0)                 # ridges at the mid level set
-    web = np.clip((web - 0.72) / 0.28, 0.0, 1.0)          # thin web lines
-    web = cv2.GaussianBlur(web, (0, 0), 0.8)
-    out = 0.35 + 0.65 * web                               # subtle, lifted floor
+    web = np.clip((web - 0.5) / 0.5, 0.0, 1.0)            # THICKER streaks (wider band)
+    web = cv2.GaussianBlur(web, (0, 0), 2.2)              # much smoother
+    out = 0.3 + 0.35 * web                                # less intense (peak ~0.65, not 1.0)
     return (np.clip(out, 0, 1) * 255.0).astype(np.uint8)
 
 
@@ -102,10 +104,12 @@ def holo_pattern(w: int, h: int, pattern: str, seed: int = 0) -> np.ndarray:
     raise ValueError(f"bad holo pattern {pattern!r}; expected {HOLO_PATTERNS}")
 
 
-def pattern_normal(pattern_gray: np.ndarray, strength: float = 2.0) -> np.ndarray:
-    """Normal map from a grayscale pattern (so the etched texture bends the holo)."""
+def pattern_normal(pattern_gray: np.ndarray, strength: float = 1.2) -> np.ndarray:
+    """Normal map from a grayscale pattern. Strength reduced (2.0->1.2) + the pattern
+    is pre-blurred so the normals are much smoother / less intense."""
     from texturegen.physical_texture import height_to_normal
-    return height_to_normal(pattern_gray.astype(np.float32) / 255.0, strength=strength)
+    smooth = cv2.GaussianBlur(pattern_gray.astype(np.float32) / 255.0, (0, 0), 1.5)
+    return height_to_normal(smooth, strength=strength)
 
 
 def masked_pattern(w: int, h: int, picture_region, mode: str, pattern: str,

@@ -21,6 +21,11 @@
       "max_shapes": 12,
       "allow_overlap": false,
       "out_of_frustum": "keep"
+    },
+    "binder": {
+      "_comment": "max_cards caps filled slots. out_of_frustum: keep|remove.",
+      "max_cards": 12,
+      "out_of_frustum": "keep"
     }
   }
 }

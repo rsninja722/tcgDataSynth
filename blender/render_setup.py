@@ -38,6 +38,13 @@ def _setup_cycles(scene, samples: int, device: str) -> str:
     scene.cycles.samples = samples
     scene.cycles.use_denoising = True
     scene.cycles.use_adaptive_sampling = True
+    # Stacked thin-walled plastic (card + sleeve[2] + toploader[2]) needs many
+    # transparent bounces or the layers turn opaque/black.
+    try:
+        scene.cycles.transparent_max_bounces = 32
+        scene.cycles.max_bounces = max(scene.cycles.max_bounces, 16)
+    except Exception as exc:  # noqa: BLE001
+        note += f" [bounce set failed: {exc}]"
     return note
 
 

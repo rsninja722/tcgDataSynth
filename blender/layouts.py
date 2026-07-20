@@ -9,12 +9,16 @@ a background plane with a random noisy material behind everything.
 from __future__ import annotations
 
 import math
+import os
 from typing import List
 
 import bpy
 import bmesh
 
 from blender import scene_builder as sb
+from blender import protection as prot
+
+_ASSETS = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets"))
 
 
 def _plane(name: str, sx: float, sy: float, z: float = 0.0):
@@ -127,6 +131,189 @@ def _bg_prop(rng, i: int):
     o.rotation_euler = tuple(float(rng.uniform(0.0, 6.283)) for _ in range(3))
     o.data.materials.append(_noisy_material(f"PropM{i}", rng))
     return o
+
+
+def _solid_material(name: str, rng, color=None, roughness: float = 0.6):
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    c = color if color is not None else tuple(float(v) for v in rng.uniform(0.08, 0.65, 3))
+    bsdf.inputs["Base Color"].default_value = (c[0], c[1], c[2], 1.0)
+    bsdf.inputs["Roughness"].default_value = roughness
+    return mat
+
+
+def _weld_material(name: str):
+    """Frosted semi-transparent seam where the two page layers are welded together."""
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    bsdf.inputs["Base Color"].default_value = (0.85, 0.85, 0.88, 1.0)
+    bsdf.inputs["Roughness"].default_value = 0.35
+    bsdf.inputs["Alpha"].default_value = 0.6
+    return mat
+
+
+def _empty(name: str, loc):
+    e = bpy.data.objects.new(name, None)
+    e.location = loc
+    bpy.context.collection.objects.link(e)
+    return e
+
+
+def _box(name: str, sx: float, sy: float, sz: float):
+    bpy.ops.mesh.primitive_cube_add(size=1.0)
+    o = bpy.context.active_object
+    o.name = name
+    o.scale = (sx, sy, sz)
+    return o
+
+
+# --------------------------------------------------------------------------- #
+# Binder (spec §3.5.1): two-layer pages (clear front over cards, colored/clear back)
+# in a grid, on a hard-cover board with a spine; one or two offset pages.
+# --------------------------------------------------------------------------- #
+# Per content type: slot (w,h), content thickness, and page front-sheet gap (m).
+_BINDER_CONTENT = {
+    "sleeved":   {"size": (0.067, 0.092), "thick": 0.0018, "gap": 0.003},
+    "toploader": {"size": (0.074, 0.098), "thick": 0.0022, "gap": 0.004},
+    "slab":      {"size": (0.080, 0.135), "thick": 0.0067, "gap": 0.009},
+}
+
+
+def _build_binder_page(pivot, pivot_x, pcx, page_w, page_h, pad, cw, ch, gap, rows, cols,
+                       cg, ct, page_color, warp, rng, cards, filled, cache_dir, card_lib,
+                       instances, tag):
+    """Build one page (back + welded slot grid + cards + clear front) on a half,
+    parented to that half's `pivot`. World x = pivot_x + local x."""
+    def local(wx):
+        return wx - pivot_x
+
+    back = _plane(f"PageBack_{tag}", page_w, page_h)
+    back.location = (local(pcx), 0.0, -0.0006)
+    back.parent = pivot
+    if page_color == "solid":
+        back.data.materials.append(_solid_material(f"PageBack_{tag}", rng, roughness=0.5))
+    else:
+        back.data.materials.append(prot.make_clear_plastic(f"PageBackClr_{tag}", warp,
+                                                           warp_strength=0.5))
+
+    # Welded seams at the midpoints between slots (+ page edges) => separate slots.
+    wm = _weld_material(f"Weld_{tag}")
+    lw = 0.0015
+    z0, z1 = -0.0006, cg
+    wz, wh = (z0 + z1) / 2.0, (z1 - z0)
+    vxs = ([-page_w / 2 + pad / 2]
+           + [-page_w / 2 + pad + c * (cw + gap) + cw + gap / 2 for c in range(cols - 1)]
+           + [page_w / 2 - pad / 2])
+    for j, vx in enumerate(vxs):
+        b = _box(f"WeldV_{tag}_{j}", lw, page_h, wh)
+        b.location = (local(pcx + vx), 0.0, wz)
+        b.parent = pivot
+        b.data.materials.append(wm)
+    hys = ([page_h / 2 - pad / 2]
+           + [page_h / 2 - pad - r * (ch + gap) - ch - gap / 2 for r in range(rows - 1)]
+           + [-page_h / 2 + pad / 2])
+    for j, hy in enumerate(hys):
+        b = _box(f"WeldH_{tag}_{j}", page_w, lw, wh)
+        b.location = (local(pcx), hy, wz)
+        b.parent = pivot
+        b.data.materials.append(wm)
+
+    for card_cfg, slot in zip(cards, filled):
+        r, c = slot // cols, slot % cols
+        sx = -page_w / 2 + pad + c * (cw + gap) + cw / 2
+        sy = page_h / 2 - pad - r * (ch + gap) - ch / 2
+        inst = sb.build_card_instance(f"Card{slot}", card_cfg, card_lib.select(rng),
+                                      cache_dir, rng)
+        inst.root.location = (local(pcx + sx), sy, ct / 2 + 0.0004)
+        inst.root.rotation_euler = (math.pi if card_cfg.back_to_camera else 0.0, 0.0, 0.0)
+        inst.root.parent = pivot
+        instances.append(inst)
+
+    front = _plane(f"PageFront_{tag}", page_w, page_h)
+    front.location = (local(pcx), 0.0, cg)
+    front.parent = pivot
+    front.data.materials.append(prot.make_clear_plastic(f"PageFront_{tag}", warp,
+                                                        warp_strength=0.5))
+
+
+def build_binder(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
+    """Binder layout: centered 30mm spine with two cover halves that tilt inward up to
+    10deg; the content page (welded slot grid) sits on the configured side; a reused
+    table backdrop fills the background. Returns (instances, frame_extent_m)."""
+    p = scene_cfg.layout.params
+    rows, cols = (int(x) for x in str(p.get("grid", "3x3")).split("x"))
+    content = _BINDER_CONTENT.get(p.get("content_type", "sleeved"), _BINDER_CONTENT["sleeved"])
+    cw, ch = content["size"]
+    ct, cg = content["thick"], content["gap"]
+    gap = float(p.get("slot_gap_mm", 12)) / 1000.0
+    pad = float(rng.uniform(0.007, 0.018))
+    page_w = cols * cw + (cols - 1) * gap + 2 * pad
+    page_h = rows * ch + (rows - 1) * gap + 2 * pad
+    warp = os.path.join(_ASSETS, "plastic_warp_0.png")
+    page_color = p.get("page_color", "clear")
+    margin = float(rng.uniform(0.010, 0.020))
+    spine_w = 0.030
+    half_w = page_w + 2 * margin
+    board_h = page_h + 2 * margin
+    side = p.get("side", "right")
+    tilt = math.radians(float(rng.uniform(0.0, 10.0)))   # inward tilt of the halves
+
+    # Reuse the table (background plane, no clutter) so the bg isn't a grey void.
+    bg = _plane("Table", 3.0, 3.0)
+    bg.location = (0.0, 0.0, -0.11)
+    bg.data.materials.append(_noisy_material("TableMat", rng))
+
+    # Centered spine.
+    spine = _box("Spine", spine_w, board_h, 0.012)
+    spine.location = (0.0, 0.0, -0.006)
+    spine.data.materials.append(_solid_material("SpineMat", rng, roughness=0.5))
+
+    board_color = tuple(float(v) for v in rng.uniform(0.08, 0.5, 3))
+    filled = list(p.get("filled_slots", list(range(len(scene_cfg.cards)))))
+    instances = []
+    for sign, this_side in ((-1, "left"), (1, "right")):
+        pivot_x = sign * spine_w / 2.0
+        pivot = _empty(f"Half_{this_side}", (pivot_x, 0.0, 0.0))
+        board_cx = sign * (spine_w / 2.0 + half_w / 2.0)
+        board = _plane(f"Board_{this_side}", half_w, board_h)
+        board.location = (board_cx - pivot_x, 0.0, -0.005)
+        board.parent = pivot
+        board.data.materials.append(_solid_material(f"Board_{this_side}", rng,
+                                                    color=board_color, roughness=0.5))
+        if this_side == side:
+            _build_binder_page(pivot, pivot_x, board_cx, page_w, page_h, pad, cw, ch, gap,
+                               rows, cols, cg, ct, page_color, warp, rng, scene_cfg.cards,
+                               filled, cache_dir, card_lib, instances, this_side)
+        pivot.rotation_euler = (0.0, -sign * tilt, 0.0)   # tilt both halves inward
+
+    extent = max(2.0 * half_w + spine_w, board_h)
+    return instances, extent
+
+
+def scatter_reflectors(rng, center, spread: float = 0.45, n: int = 9):
+    """Scatter colorful prisms/cylinders around `center` (e.g. BEHIND the camera) so
+    they show up as reflections in glossy plastic (binder pages / sleeves)."""
+    cx, cy, cz = center
+    for i in range(int(n)):
+        if rng.random() < 0.5:
+            bpy.ops.mesh.primitive_cube_add(size=1.0)
+            o = bpy.context.active_object
+            o.scale = tuple(float(rng.uniform(0.03, 0.14)) for _ in range(3))
+        else:
+            bpy.ops.mesh.primitive_cylinder_add(radius=float(rng.uniform(0.02, 0.07)),
+                                                depth=float(rng.uniform(0.06, 0.2)), vertices=24)
+            o = bpy.context.active_object
+        o.name = f"Reflector{i}"
+        o.location = (cx + float(rng.uniform(-spread, spread)),
+                      cy + float(rng.uniform(-spread, spread)),
+                      cz + float(rng.uniform(-spread * 0.6, spread * 0.6)))
+        o.rotation_euler = tuple(float(rng.uniform(0.0, 6.283)) for _ in range(3))
+        # Bright saturated colors so the reflections are obvious.
+        col = tuple(float(v) for v in rng.uniform(0.2, 1.0, 3))
+        o.data.materials.append(_solid_material(f"ReflMat{i}", rng, color=col, roughness=0.35))
+
 
 
 def build_floating(scene_cfg, card_lib, cache_dir: str, rng,

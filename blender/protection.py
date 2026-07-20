@@ -102,21 +102,65 @@ def _add_warp_normal(nt, bsdf, warp_map_path: Optional[str], strength: float = 0
         nt.links.new(sock, bsdf.inputs["Normal"])
 
 
+def _glossy(nt, roughness_val=0.06, roughness_socket=None):
+    """Glossy reflector node (fallback to Principled mirror if the id differs)."""
+    try:
+        g = nt.nodes.new("ShaderNodeBsdfGlossy")
+    except (RuntimeError, KeyError):
+        g = nt.nodes.new("ShaderNodeBsdfPrincipled")
+        g.inputs["Base Color"].default_value = (1.0, 1.0, 1.0, 1.0)
+        g.inputs["Metallic"].default_value = 1.0
+    if roughness_socket is not None:
+        nt.links.new(roughness_socket, g.inputs["Roughness"])
+    else:
+        g.inputs["Roughness"].default_value = roughness_val
+    return g, g.inputs.get("Normal")
+
+
+def _thin_walled_graph(nt, roughness_val=0.06, roughness_socket=None, tint=(1.0, 1.0, 1.0),
+                       warp_sock=None, ior=1.5):
+    """Thin-walled clear plastic (single zero-thickness sheet): NO transmission/
+    refraction (which would permanently bend the camera ray and corrupt the holo
+    card's dot(N,Incoming) underneath). Instead Fresnel(IOR, warp normal) mixes a
+    Transparent BSDF body with a Glossy reflection (warp normal into Glossy only), and
+    a Light-Path 'Is Shadow Ray' branch outputs pure Transparent so lamp light passes
+    through unattenuated (no darkening). Caller clears the tree + builds warp first."""
+    nodes, links = nt.nodes, nt.links
+    out = nodes.new("ShaderNodeOutputMaterial")
+    transp_body = nodes.new("ShaderNodeBsdfTransparent")
+    transp_body.inputs["Color"].default_value = (tint[0], tint[1], tint[2], 1.0)
+    glossy, gnorm = _glossy(nt, roughness_val, roughness_socket)
+    fres = nodes.new("ShaderNodeFresnel")
+    fres.inputs["IOR"].default_value = ior
+    if warp_sock is not None:
+        if gnorm is not None:
+            links.new(warp_sock, gnorm)          # warp -> Glossy only
+        links.new(warp_sock, fres.inputs["Normal"])
+    inner = nodes.new("ShaderNodeMixShader")
+    links.new(fres.outputs["Fac"], inner.inputs[0])
+    links.new(transp_body.outputs["BSDF"], inner.inputs[1])
+    links.new(glossy.outputs["BSDF"], inner.inputs[2])
+    # Shadow-ray branch: pure Transparent so lamp light isn't attenuated.
+    lp = nodes.new("ShaderNodeLightPath")
+    transp_shadow = nodes.new("ShaderNodeBsdfTransparent")   # white
+    outer = nodes.new("ShaderNodeMixShader")
+    links.new(lp.outputs["Is Shadow Ray"], outer.inputs[0])
+    links.new(inner.outputs[0], outer.inputs[1])
+    links.new(transp_shadow.outputs["BSDF"], outer.inputs[2])
+    links.new(outer.outputs[0], (out.inputs.get("Surface") or out.inputs[0]))
+
+
 def make_clear_plastic(name: str, warp_map_path: Optional[str],
-                       roughness: float = 0.06, transmission: float = 1.0,
-                       uv_xform=None):
-    """Clear plastic via Principled transmission (the t03 material that looked good for
-    clear sleeves in Cycles). Warp normal map makes reflections uneven; `uv_xform`
-    randomizes the sampled region per instance."""
+                       roughness: float = 0.06, uv_xform=None, warp_strength: float = 0.18):
+    """Clear thin plastic (sleeves): thin-walled shader (no refraction -> holo card
+    behind it stays correct). `roughness` 0.06 clear / 0.12 matte. `warp_strength`
+    controls how warped/loose the surface looks (binder pages use a high value)."""
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nt = mat.node_tree
-    bsdf = nt.nodes.get("Principled BSDF")
-    bsdf.inputs["Base Color"].default_value = (1.0, 1.0, 1.0, 1.0)
-    bsdf.inputs["Roughness"].default_value = roughness
-    bsdf.inputs["Transmission Weight"].default_value = transmission
-    bsdf.inputs["IOR"].default_value = 1.5
-    _add_warp_normal(nt, bsdf, warp_map_path, uv_xform=uv_xform)
+    nt.nodes.clear()
+    warp = _warp_normal_socket(nt, warp_map_path, strength=warp_strength, uv_xform=uv_xform)
+    _thin_walled_graph(nt, roughness_val=roughness, warp_sock=warp)
     return mat
 
 
@@ -367,34 +411,67 @@ def make_toploader_plastic(name: str, warp_map_path: Optional[str],
                            wear_map_path: Optional[str], base_rough: float = 0.05,
                            wear_rough: float = 0.35, tint=(1.0, 1.0, 1.0),
                            uv_xform=None, wear_uv_xform=None):
-    """Slightly-tinted rigid plastic (toploader/slab surface) via Principled
-    transmission; roughness modulated by the wear map (micro scratches + dust catch
-    the light where worn). `tint` lightly colors the transmitted light."""
+    """Rigid clear plastic (TOPLOADER / semi-rigid surface): thin-walled shader (no
+    refraction, so a holo card inside stays correct). Glossy roughness modulated by the
+    wear map; `tint` lightly colors the see-through body."""
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    warp = _warp_normal_socket(nt, warp_map_path, uv_xform=uv_xform)
+    rough_sock = _wear_roughness_socket(nt, wear_map_path, base_rough, wear_rough, wear_uv_xform)
+    _thin_walled_graph(nt, roughness_val=base_rough, roughness_socket=rough_sock,
+                       tint=tint, warp_sock=warp)
+    return mat
+
+
+def _wear_roughness_socket(nt, wear_map_path, base_rough, wear_rough, wear_uv_xform):
+    """MapRange(wear -> [base,worn]) -> Result socket driving roughness, or None."""
+    if not (wear_map_path and os.path.isfile(wear_map_path)):
+        return None
+    try:
+        tex = nt.nodes.new("ShaderNodeTexImage")
+        img = bpy.data.images.load(wear_map_path, check_existing=True)
+        img.colorspace_settings.name = "Non-Color"
+        tex.image = img
+        _apply_uv_mapping(nt, tex, wear_uv_xform)
+        mr = nt.nodes.new("ShaderNodeMapRange")
+        mr.inputs["To Min"].default_value = base_rough
+        mr.inputs["To Max"].default_value = wear_rough
+        nt.links.new(tex.outputs["Color"], mr.inputs["Value"])
+        return mr.outputs["Result"]
+    except Exception as exc:  # noqa: BLE001
+        print(f"[protection] wear map load failed {wear_map_path}: {exc}")
+        return None
+
+
+def make_slab_surface(name: str, warp_map_path: Optional[str], wear_map_path: Optional[str],
+                      base_rough: float = 0.05, wear_rough: float = 0.35,
+                      tint=(1.0, 1.0, 1.0), uv_xform=None, wear_uv_xform=None):
+    """SLAB surface: KEEP real Principled transmission (it's solid acrylic with front
+    AND back faces, so refraction cancels). Reduced front-face warp normal strength +
+    a Light-Path shadow-ray branch so lamp light passes through unattenuated."""
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nt = mat.node_tree
     bsdf = nt.nodes.get("Principled BSDF")
+    out = nt.nodes.get("Material Output")
     bsdf.inputs["Base Color"].default_value = (tint[0], tint[1], tint[2], 1.0)
     bsdf.inputs["Transmission Weight"].default_value = 1.0
     bsdf.inputs["IOR"].default_value = 1.5
-    if wear_map_path and os.path.isfile(wear_map_path):
-        tex = nt.nodes.new("ShaderNodeTexImage")
-        try:
-            img = bpy.data.images.load(wear_map_path, check_existing=True)
-            img.colorspace_settings.name = "Non-Color"
-            tex.image = img
-            _apply_uv_mapping(nt, tex, wear_uv_xform)
-            mr = nt.nodes.new("ShaderNodeMapRange")
-            mr.inputs["To Min"].default_value = base_rough
-            mr.inputs["To Max"].default_value = wear_rough
-            nt.links.new(tex.outputs["Color"], mr.inputs["Value"])
-            nt.links.new(mr.outputs["Result"], bsdf.inputs["Roughness"])
-        except Exception as exc:  # noqa: BLE001
-            print(f"[protection] wear map load failed {wear_map_path}: {exc}")
-            bsdf.inputs["Roughness"].default_value = base_rough
+    rough_sock = _wear_roughness_socket(nt, wear_map_path, base_rough, wear_rough, wear_uv_xform)
+    if rough_sock is not None:
+        nt.links.new(rough_sock, bsdf.inputs["Roughness"])
     else:
         bsdf.inputs["Roughness"].default_value = base_rough
-    _add_warp_normal(nt, bsdf, warp_map_path, uv_xform=uv_xform)
+    _add_warp_normal(nt, bsdf, warp_map_path, strength=0.08, uv_xform=uv_xform)  # reduced
+    lp = nt.nodes.new("ShaderNodeLightPath")
+    transp = nt.nodes.new("ShaderNodeBsdfTransparent")
+    mix = nt.nodes.new("ShaderNodeMixShader")
+    nt.links.new(lp.outputs["Is Shadow Ray"], mix.inputs[0])
+    nt.links.new(bsdf.outputs["BSDF"], mix.inputs[1])
+    nt.links.new(transp.outputs["BSDF"], mix.inputs[2])
+    nt.links.new(mix.outputs[0], out.inputs["Surface"])
     return mat
 
 
@@ -639,9 +716,9 @@ def build_slab(name: str, warp_map_path: Optional[str], wear_map_path: Optional[
     if link:
         bpy.context.collection.objects.link(obj)
     _assign_materials(obj, [
-        make_toploader_plastic(name + "_surface", warp_map_path, wear_map_path,
-                               base_rough=0.05, wear_rough=wear_rough, tint=tint,
-                               uv_xform=uv_xform, wear_uv_xform=wear_uv_xform),
+        make_slab_surface(name + "_surface", warp_map_path, wear_map_path,
+                          base_rough=0.05, wear_rough=wear_rough, tint=tint,
+                          uv_xform=uv_xform, wear_uv_xform=wear_uv_xform),
         make_frosted_back(name + "_back", warp_map_path, uv_xform=wear_uv_xform),
         make_label_material(name + "_label", label_path),
         make_connector_material(name + "_connector"),

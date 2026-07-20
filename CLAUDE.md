@@ -305,7 +305,37 @@ runs in Blender 5.0 and reports back. Pure-Python modules are unit-tested in Doc
         + _reflect_node w/ Glossy→Principled-mirror fallback); wear still drives glossy
         roughness. scene_builder holder tint softened to (0.97,0.98,1.0). CHANGES SLEEVE/
         TOPLOADER EVERYWHERE (re-verify t03/t04 normal-card look). **Awaiting user run.**
-      NEXT layouts: binder, display case, hand. Then Phase 5 (lighting/camera random),
+      - THIN-WALLED PLASTIC FIX (user's precise diagnosis): single-sided transmission
+        permanently refracts camera ray → corrupts holo dot(N,Incoming) + Cycles kills the
+        caustic → dark. FIX: make_clear_plastic + make_toploader_plastic = thin-walled
+        (Fresnel(IOR1.5,warp) mixing Transparent + Glossy[warp only], + LightPath IsShadowRay
+        → pure Transparent so lamp light passes). Slab keeps real transmission (make_slab_surface,
+        reduced warp 0.08 + shadow branch). render_setup transparent_max_bounces=32. t10
+        verify (bare/sleeve/toploader/both) CONFIRMED GOOD by user.
+      - Holo pattern tweaks (user): cosmos base flat black (circles only); water_web thicker/
+        less-intense(peak0.65)/smoother(blur2.2); horizontal_lines amp 0.5→0.35 (~30% less);
+        pattern_normal strength 2.0→1.2 + pre-blur (smoother). Patterns gen at runtime (no assets).
+      - BINDER (t11) DELIVERED — awaiting user run. layouts.build_binder: grid (rows x cols
+        from "RxC"), content footprint per type (_BINDER_CONTENT sleeved/toploader/slab),
+        slot_gap + padding, filled_slots (empty slots), clear thin-walled front pocket sheet
+        + clear/solid back, hard-cover board (_solid_material) + 30mm spine, one/two offset
+        pages. Cards = build_card_instance placed in grid, face +Z, labeled through front.
+        Returns (instances, extent) for framing. binder config block added (max_cards 12).
+        tests/t11_binder.py. v1 — expect board/spine/scale tuning.
+      - t11 v2 (user): binder pages warped/loose+reflective → make_clear_plastic gained
+        warp_strength (pages use 0.5 vs sleeve 0.18). Mirror-reflection test:
+        layouts.scatter_reflectors (colorful prisms/cylinders) + non-sun point lights placed
+        BEHIND the camera (setup_reflection_lighting) so they show only as reflections. t11
+        now renders 4 scenes covering ALL grids(1x1/2x2/3x3/4x3) × page(clear/solid) ×
+        content(slab/toploader/sleeved).
+      - t11 v3 (user): (1) WELDED slot dividers — thin frosted bars (_weld_material) at slot
+        midpoints/edges (vertical cols+1, horizontal rows+1) making separate slots. (2) Spine
+        now CENTERED with TWO cover halves (_empty pivots at spine edges); content page on the
+        configured side. (3) Halves TILT INWARD up to 10° about the spine (pivot rot_y=-sign*tilt;
+        all half objects parented to pivot in local coords). (4) Reused table backdrop
+        (_plane+_noisy_material behind, no clutter). build_binder now returns (instances,extent).
+        **Awaiting user run.**
+      NEXT layouts: display case, hand. Then Phase 5 (lighting/camera random),
       6 (postfx), 7 (GUI), 8 (throughput).
 - [ ] Phase 5 — lighting & camera randomization
 - [ ] Phase 6 — post effects (postfx)

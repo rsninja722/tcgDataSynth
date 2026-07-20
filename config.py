@@ -139,6 +139,7 @@ DEFAULT_CONFIG = {
         "table": {"max_cards": 8, "allow_overlap": False, "out_of_frustum": "keep"},
         "floating": {"max_cards": 12, "max_shapes": 12, "allow_overlap": False,
                      "out_of_frustum": "keep"},
+        "binder": {"max_cards": 12, "out_of_frustum": "keep"},
     },
 }
 # Back-compat alias (used by tests / older references).
