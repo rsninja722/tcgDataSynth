@@ -1,16 +1,18 @@
 """
 Ultralytics YOLO-pose label formatting & parsing (bpy-FREE, Docker-testable).
 
-Label line (spec §3.9), one per labeled card:
+Label line (spec §3.9 + holo tag), one per labeled card:
 
-    class cx cy w h  x1 y1 v1  x2 y2 v2  x3 y3 v3  x4 y4 v4  |<card_id>
+    class cx cy w h  x1 y1 v1  x2 y2 v2  x3 y3 v3  x4 y4 v4  |<card_id>|<holo_tag>
 
 - All coords normalized to [0,1], image top-left origin.
 - bbox (cx,cy,w,h) = min/max envelope of the four corner keypoints.
 - Keypoints in FIXED order (config.KEYPOINT_ORDER, default TL,TR,BR,BL) in the
   card's own upright frame; visibility flag = 2 for all four.
-- The trailing ` |<card_id>` is our extension. A "strictly standard" variant
-  (no suffix) can be emitted into a sibling folder via include_id=False.
+- The trailing ` |<card_id>|<holo_tag>` is our extension. holo_tag is one of:
+  'none' (no holo), 'full' (whole-card holo), 'holo' (picture-region holo),
+  'reverse' (reverse holo). A "strictly standard" variant (no suffixes) can be
+  emitted into a sibling folder via include_id=False.
 
 The Blender side computes the four normalized corners (with Y already flipped to
 top-left origin) and hands them here; this module never touches bpy.
@@ -43,11 +45,15 @@ def bbox_from_corners(corners: Sequence[Corner]) -> Tuple[float, float, float, f
     return ((x0 + x1) / 2.0, (y0 + y1) / 2.0, x1 - x0, y1 - y0)
 
 
+HOLO_TAGS = ("none", "full", "holo", "reverse")
+
+
 @dataclass(frozen=True)
 class CardLabel:
     """One card instance's label data (already normalized, top-left origin)."""
     card_id: str
     corners: Tuple[Corner, Corner, Corner, Corner]  # in KEYPOINT_ORDER
+    holo_tag: str = "none"                           # none | full | holo | reverse
     class_id: int = config.YOLO_CLASS_ID
     visibility: int = config.KPT_VISIBILITY
 
@@ -58,7 +64,7 @@ class CardLabel:
             parts.extend([_fmt(x), _fmt(y), str(int(self.visibility))])
         line = " ".join(parts)
         if include_id:
-            line += f" |{self.card_id}"
+            line += f" |{self.card_id}|{self.holo_tag}"
         return line
 
 
@@ -69,16 +75,22 @@ class ParsedLabel:
     bbox: Tuple[float, float, float, float]           # cx, cy, w, h
     corners: List[Corner]
     visibilities: List[int]
-    card_id: str  # "" if the line had no |id suffix
+    card_id: str        # "" if the line had no |id suffix
+    holo_tag: str = ""  # "" if the line had no |tag suffix
 
 
 def parse_pose_line(line: str) -> ParsedLabel:
-    """Parse one label line, tolerating the optional trailing ` |<card_id>`."""
+    """Parse one label line, tolerating optional trailing ` |<card_id>|<holo_tag>`."""
     line = line.strip()
     card_id = ""
+    holo_tag = ""
     if "|" in line:
-        line, card_id = line.rsplit("|", 1)
-        card_id = card_id.strip()
+        segs = line.split("|")
+        line = segs[0]
+        if len(segs) >= 2:
+            card_id = segs[1].strip()
+        if len(segs) >= 3:
+            holo_tag = segs[2].strip()
     toks = line.split()
     class_id = int(float(toks[0]))
     cx, cy, w, h = (float(t) for t in toks[1:5])
@@ -90,7 +102,7 @@ def parse_pose_line(line: str) -> ParsedLabel:
         v = int(float(kpt_toks[i + 2])) if i + 2 < len(kpt_toks) else 2
         corners.append((x, y))
         vis.append(v)
-    return ParsedLabel(class_id, (cx, cy, w, h), corners, vis, card_id)
+    return ParsedLabel(class_id, (cx, cy, w, h), corners, vis, card_id, holo_tag)
 
 
 def write_label_file(path: str, labels: Sequence[CardLabel], include_id: bool = True) -> None:

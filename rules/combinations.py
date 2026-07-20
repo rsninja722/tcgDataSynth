@@ -233,11 +233,20 @@ def _sample_finish(rng, opts) -> FinishConfig:
     kind = _choice(rng, _require(opts["finishes"], "finishes"))
     if kind != "holo":
         return FinishConfig(kind="normal")
+    patterns = _require(opts["holo_patterns"], "holo_patterns")
+    physical = bool(opts.get("physical_texture", True)) and _maybe(rng, 0.5)
+    # Rule: a physical-texture card is ALWAYS paired with the 'none' holo pattern
+    # (the etched lines are the structure; other patterns don't co-occur with it).
+    if physical and "none" in patterns:
+        pattern = "none"
+    else:
+        physical = False
+        pattern = _choice(rng, patterns)
     return FinishConfig(
         kind="holo",
         holo_region=_choice(rng, _require(opts["holo_regions"], "holo_regions")),
-        holo_pattern=_choice(rng, _require(opts["holo_patterns"], "holo_patterns")),
-        physical_texture=bool(opts.get("physical_texture", True)) and _maybe(rng, 0.7),
+        holo_pattern=pattern,
+        physical_texture=physical,
     )
 
 
@@ -427,11 +436,17 @@ def _sample_postfx(rng, opts) -> PostFxConfig:
 # --------------------------------------------------------------------------- #
 # Entry point + validation
 # --------------------------------------------------------------------------- #
-def sample_scene_config(enabled_options: Optional[Dict[str, Any]], rng_seed: int) -> SceneConfig:
-    """Sample ONE validated scene config from a seed. Deterministic per seed."""
+def sample_scene_config(enabled_options: Optional[Dict[str, Any]], rng_seed: int,
+                        max_cards: Optional[int] = None) -> SceneConfig:
+    """Sample ONE validated scene config from a seed. Deterministic per seed.
+    `max_cards` (if given) caps the number of cards in the scene."""
     opts = _resolve(enabled_options)
     rng = np.random.default_rng(rng_seed)
     layout, cards = _sample_layout_and_cards(rng, opts)
+    if max_cards is not None and len(cards) > max_cards:
+        cards = cards[:max(1, int(max_cards))]
+        if layout.kind == "binder":
+            layout.params["filled_slots"] = layout.params["filled_slots"][:len(cards)]
     cfg = SceneConfig(
         seed=int(rng_seed),
         layout=layout,
@@ -475,6 +490,9 @@ def validate_scene_config(cfg: SceneConfig) -> None:
         if f.kind == "holo":
             assert f.holo_region in HOLO_REGIONS, f.holo_region
             assert f.holo_pattern in HOLO_PATTERNS, f.holo_pattern
+            if f.physical_texture:
+                assert f.holo_pattern == "none", \
+                    "physical texture must pair with the 'none' holo pattern"
         else:
             assert f.holo_region is None and f.holo_pattern is None
             assert f.physical_texture is False

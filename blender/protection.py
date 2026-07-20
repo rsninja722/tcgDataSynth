@@ -105,9 +105,9 @@ def _add_warp_normal(nt, bsdf, warp_map_path: Optional[str], strength: float = 0
 def make_clear_plastic(name: str, warp_map_path: Optional[str],
                        roughness: float = 0.06, transmission: float = 1.0,
                        uv_xform=None):
-    """Clear plastic via Principled transmission (the original t03 material that
-    looked good for clear sleeves in Cycles). Warp normal map makes reflections
-    uneven; `uv_xform` randomizes the sampled region per instance."""
+    """Clear plastic via Principled transmission (the t03 material that looked good for
+    clear sleeves in Cycles). Warp normal map makes reflections uneven; `uv_xform`
+    randomizes the sampled region per instance."""
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nt = mat.node_tree
@@ -367,10 +367,9 @@ def make_toploader_plastic(name: str, warp_map_path: Optional[str],
                            wear_map_path: Optional[str], base_rough: float = 0.05,
                            wear_rough: float = 0.35, tint=(1.0, 1.0, 1.0),
                            uv_xform=None, wear_uv_xform=None):
-    """Slightly-tinted rigid plastic (not fully clear) whose roughness is modulated
-    by a wear map (micro scratches + dust catch the light where worn). The `tint`
-    lightly colors the transmitted light (bright grey -> bluish). `uv_xform` /
-    `wear_uv_xform` randomize the warp and wear sample regions per instance."""
+    """Slightly-tinted rigid plastic (toploader/slab surface) via Principled
+    transmission; roughness modulated by the wear map (micro scratches + dust catch
+    the light where worn). `tint` lightly colors the transmitted light."""
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nt = mat.node_tree

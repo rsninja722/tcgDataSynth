@@ -73,20 +73,79 @@ def height_to_normal(height: np.ndarray, strength: float = 2.0) -> np.ndarray:
     return (np.clip(rgb * 0.5 + 0.5, 0, 1) * 255.0 + 0.5).astype(np.uint8)
 
 
+def traced_lines(fx: np.ndarray, fy: np.ndarray, spacing: float = 3.0,
+                 step: float = 0.6, seed: int = 0, max_len: int = 0) -> np.ndarray:
+    """Evenly-spaced streamlines of the flow field (Jobard-Lefebvre style): clean
+    1px anti-aliased lines separated by `spacing` px (default 3 => 1px line + 2px gap),
+    NOT noisy. Each line propagates until it exits the card or meets another line (so
+    the card fills with flowing lines and no gaps need vertical fill). Returns (h,w)
+    float32 in [0,1]."""
+    h, w = fx.shape
+    out = np.zeros((h, w), np.float32)
+    cell = max(1.0, spacing)
+    # Large enough that a line can cross the whole card; it still stops at the border
+    # or another line first. Only a backstop against closed-loop flows.
+    if max_len <= 0:
+        max_len = int((w + h) * 3.0 / step)
+    gh, gw = int(np.ceil(h / cell)), int(np.ceil(w / cell))
+    occ = np.zeros((gh, gw), np.uint8)   # separation grid (previous lines only)
+    rng = np.random.default_rng(seed)
+
+    def sample(field, x, y):
+        x0, y0 = int(np.floor(x)), int(np.floor(y))
+        if x0 < 0 or y0 < 0 or x0 >= w - 1 or y0 >= h - 1:
+            return None
+        tx, ty = x - x0, y - y0
+        return (field[y0, x0] * (1 - tx) * (1 - ty) + field[y0, x0 + 1] * tx * (1 - ty)
+                + field[y0 + 1, x0] * (1 - tx) * ty + field[y0 + 1, x0 + 1] * tx * ty)
+
+    def occ_at(x, y):
+        gx, gy = int(x / cell), int(y / cell)
+        return not (0 <= gx < gw and 0 <= gy < gh) or occ[gy, gx]
+
+    def trace(sx, sy, direction):
+        pts, x, y = [], sx, sy
+        pvx = pvy = None
+        for _ in range(max_len):
+            vx, vy = sample(fx, x, y), sample(fy, x, y)
+            if vx is None:
+                break
+            if pvx is not None and (vx * pvx + vy * pvy) < 0:   # line field: fix sign flips
+                vx, vy = -vx, -vy
+            pvx, pvy = vx, vy
+            x += direction * vx * step
+            y += direction * vy * step
+            if x < 0 or y < 0 or x >= w or y >= h or occ_at(x, y):
+                break
+            pts.append((x, y))
+        return pts
+
+    cells = [(gx, gy) for gy in range(gh) for gx in range(gw)]
+    rng.shuffle(cells)
+    for (gx, gy) in cells:
+        sx, sy = (gx + 0.5) * cell, (gy + 0.5) * cell
+        if occ_at(sx, sy):
+            continue
+        line = list(reversed(trace(sx, sy, -1.0))) + [(sx, sy)] + trace(sx, sy, 1.0)
+        if len(line) < 2:
+            continue
+        cv2.polylines(out, [np.round(line).astype(np.int32)], False, 1.0, 1, cv2.LINE_AA)
+        for (x, y) in line:
+            ggx, ggy = int(x / cell), int(y / cell)
+            if 0 <= ggx < gw and 0 <= ggy < gh:
+                occ[ggy, ggx] = 1
+    return out
+
+
 def generate_physical_texture(card_bgr: np.ndarray, seed: int = 0,
-                              line_length: int = 30, normal_strength: float = 1.4,
-                              line_spacing: float = 1.5) -> Tuple[np.ndarray, np.ndarray]:
+                              spacing: float = 3.0, normal_strength: float = 1.4
+                              ) -> Tuple[np.ndarray, np.ndarray]:
     """From a BGR card image, return (line_pattern_gray_uint8, normal_map_rgb_uint8).
-    The LIC input noise is band-limited (blurred by `line_spacing`) so the etched
-    lines are evenly spaced and clean rather than grainy; `line_length` = how far
-    the lines are traced (smoothness)."""
+    Clean evenly-spaced etched lines (1px AA, `spacing`px apart) that follow the art's
+    high-contrast contours."""
     gray = cv2.cvtColor(card_bgr, cv2.COLOR_BGR2GRAY)
     fx, fy = flow_field(gray)
-    rng = np.random.default_rng(seed)
-    noise = rng.random(gray.shape).astype(np.float32)
-    noise = cv2.GaussianBlur(noise, (0, 0), line_spacing)   # band-limit -> even, clean
-    pattern = lic(fx, fy, noise, length=line_length)
-    pattern = np.clip((pattern - 0.5) * 1.3 + 0.5, 0.0, 1.0)  # gentle contrast
+    pattern = traced_lines(fx, fy, spacing=spacing, seed=seed)
     normal = height_to_normal(pattern, strength=normal_strength)
     return (pattern * 255.0 + 0.5).astype(np.uint8), normal
 

@@ -31,21 +31,22 @@ def test_flow_field_unit_ish():
     assert abs(mag.mean() - 1.0) < 0.05   # ~unit vectors
 
 
-def test_lic_and_normal_shapes():
+def test_lines_and_normal_shapes():
     card = _fake_card(120, 160)
-    pattern, normal = pt.generate_physical_texture(card, seed=1, line_length=8)
+    pattern, normal = pt.generate_physical_texture(card, seed=1)
     assert pattern.shape == (160, 120) and pattern.dtype == np.uint8
     assert normal.shape == (160, 120, 3) and normal.dtype == np.uint8
-    # normal map is mostly +Z (B channel high)
+    # normal map is mostly +Z (B channel high) since it's flat between the thin lines
     assert normal[:, :, 2].mean() > 170
-    # LIC of noise along a coherent field has more structure than the raw noise mean
-    assert pattern.std() > 10
+    # etched lines cover a minority of pixels (thin, spaced) but are clearly present
+    frac = (pattern > 40).mean()
+    assert 0.05 < frac < 0.6, frac
 
 
 def test_determinism():
     card = _fake_card(100, 100)
-    a, an = pt.generate_physical_texture(card, seed=3, line_length=6)
-    b, bn = pt.generate_physical_texture(card, seed=3, line_length=6)
+    a, an = pt.generate_physical_texture(card, seed=3)
+    b, bn = pt.generate_physical_texture(card, seed=3)
     assert np.array_equal(a, b) and np.array_equal(an, bn)
 
 

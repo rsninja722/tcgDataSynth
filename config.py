@@ -118,3 +118,87 @@ class OutputLayout:
 
 
 OUTPUT = OutputLayout()
+
+
+# --------------------------------------------------------------------------- #
+# Central runtime config (single hand-editable JSON; scripts load at runtime so
+# it can be tuned without touching code). All tunable params live here.
+# --------------------------------------------------------------------------- #
+CONFIG_FILENAME = "config.json"
+DEFAULT_CONFIG = {
+    "holo": {
+        "angle_gain": 12.0,    # flash-band motion speed vs view angle
+        "pattern_gain": 4.0,   # spatial break-up of the flash phase by the pattern
+        "sharpness": 4.0,      # flash threshold (higher = narrower/more selective)
+        "emit": 1.6,           # peak flash brightness
+        "darken": 0.18,        # base darkening between flashes
+    },
+    # Per-layout scene params (each scene type has its OWN set). Add entries here as
+    # layouts are built (out_of_frustum: 'keep' = render but don't label | 'remove').
+    "layouts": {
+        "table": {"max_cards": 8, "allow_overlap": False, "out_of_frustum": "keep"},
+        "floating": {"max_cards": 12, "max_shapes": 12, "allow_overlap": False,
+                     "out_of_frustum": "keep"},
+    },
+}
+# Back-compat alias (used by tests / older references).
+DEFAULT_HOLO_TUNING = DEFAULT_CONFIG["holo"]
+_OUT_OF_FRUSTUM_CHOICES = ("keep", "remove")
+
+
+def _coerce(default_val, new):
+    if isinstance(default_val, bool):
+        return bool(new)
+    if isinstance(default_val, int) and not isinstance(default_val, bool):
+        return int(new)
+    if isinstance(default_val, float):
+        return float(new)
+    return new  # string
+
+
+def _deep_merge(defaults: dict, raw) -> dict:
+    """Recursively merge `raw` over `defaults`, coercing leaves to the default type;
+    unknown/malformed entries fall back to defaults."""
+    out = {}
+    for k, dv in defaults.items():
+        if isinstance(dv, dict):
+            sub = raw.get(k) if isinstance(raw, dict) else None
+            out[k] = _deep_merge(dv, sub if isinstance(sub, dict) else {})
+        elif isinstance(raw, dict) and k in raw:
+            try:
+                out[k] = _coerce(dv, raw[k])
+            except (TypeError, ValueError):
+                out[k] = dv
+        else:
+            out[k] = dv
+    return out
+
+
+def load_config(path: str = None) -> dict:
+    """Full config (JSON deep-merged over DEFAULT_CONFIG, type-coerced). A bad edit
+    never crashes a render."""
+    import json
+    if path is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME)
+    raw = {}
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                raw = json.load(fh)
+        except Exception:  # noqa: BLE001
+            raw = {}
+    cfg = _deep_merge(DEFAULT_CONFIG, raw)
+    for lp in cfg.get("layouts", {}).values():   # validate enums
+        if lp.get("out_of_frustum") not in _OUT_OF_FRUSTUM_CHOICES:
+            lp["out_of_frustum"] = "keep"
+    return cfg
+
+
+def load_holo_tuning(path: str = None) -> dict:
+    """Holo tuning section (back-compat for finishes.py)."""
+    return load_config(path)["holo"]
+
+
+def load_layout_params(layout: str, path: str = None) -> dict:
+    """Per-layout scene params (e.g. 'table', 'floating')."""
+    return load_config(path)["layouts"].get(layout, {})

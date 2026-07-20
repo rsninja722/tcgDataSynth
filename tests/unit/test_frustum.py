@@ -55,6 +55,15 @@ def test_headon_labeled_with_correct_quadrants():
     assert label.card_id == "charizard"
 
 
+def test_holo_tag_written_into_label():
+    ndc = card_ndc()
+    label, reason = frustum.classify("x", ndc, front_visible=True, holo_tag="reverse")
+    assert reason == "labeled" and label.holo_tag == "reverse"
+    # default is 'none'
+    label2, _ = frustum.classify("x", ndc, front_visible=True)
+    assert label2.holo_tag == "none"
+
+
 def test_yflip_is_applied():
     # A corner high in Blender NDC (y=0.8, near top) must map to small YOLO y (top).
     ndc = [(0.5, 0.8, 0.3)] * 4

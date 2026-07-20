@@ -32,25 +32,28 @@ def test_bbox_envelope():
 
 
 def test_line_token_count_and_suffix():
-    lab = yp.CardLabel("charizard", ((0.2, 0.3), (0.7, 0.25), (0.75, 0.8), (0.15, 0.85)))
+    lab = yp.CardLabel("charizard", ((0.2, 0.3), (0.7, 0.25), (0.75, 0.8), (0.15, 0.85)),
+                       holo_tag="full")
     line = lab.to_line(include_id=True)
-    # 5 bbox tokens + 12 kpt tokens = 17, then " |id"
-    core, cid = line.rsplit("|", 1)
-    assert cid == "charizard"
-    assert len(core.split()) == 17
-    # class id first, visibilities are 2
-    toks = core.split()
-    assert toks[0] == str(config.YOLO_CLASS_ID)
-    assert toks[7] == "2" and toks[10] == "2" and toks[13] == "2" and toks[16] == "2"
-    # standard variant has no pipe
+    # ... coords ... |<card_id>|<holo_tag>
+    segs = line.split("|")
+    assert len(segs) == 3
+    assert segs[1].strip() == "charizard" and segs[2].strip() == "full"
+    core = segs[0].split()
+    assert len(core) == 17          # 5 bbox + 12 kpt
+    assert core[0] == str(config.YOLO_CLASS_ID)
+    assert core[7] == "2" and core[10] == "2" and core[13] == "2" and core[16] == "2"
+    # standard variant has no pipe (no id, no tag)
     assert "|" not in lab.to_line(include_id=False)
 
 
 def test_parse_roundtrip_with_and_without_id():
-    lab = yp.CardLabel("Base_Set_004", ((0.11, 0.22), (0.71, 0.20), (0.73, 0.79), (0.13, 0.81)))
+    lab = yp.CardLabel("Base_Set_004", ((0.11, 0.22), (0.71, 0.20), (0.73, 0.79), (0.13, 0.81)),
+                       holo_tag="reverse")
     for include_id in (True, False):
         parsed = yp.parse_pose_line(lab.to_line(include_id=include_id))
         assert parsed.card_id == ("Base_Set_004" if include_id else "")
+        assert parsed.holo_tag == ("reverse" if include_id else "")
         for (ax, ay), (bx, by) in zip(parsed.corners, lab.corners):
             assert abs(ax - bx) < 1e-6 and abs(ay - by) < 1e-6
         assert parsed.visibilities == [2, 2, 2, 2]

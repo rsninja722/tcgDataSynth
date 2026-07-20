@@ -43,10 +43,14 @@ def _edge_corner_bias(h, w, power: float = 2.0) -> np.ndarray:
 
 
 def dirt(w: int, h: int, seed: int = 0, strength: float = 0.5) -> np.ndarray:
-    """Patchy grime overlay (brownish, semi-transparent)."""
+    """Patchy grime overlay (brownish, semi-transparent). A LARGE-scale mask leaves
+    whole regions clean so it's not a uniform layer of dirt."""
     rng = np.random.default_rng(seed)
     patches = _smooth_noise(h, w, 20, rng) * _smooth_noise(h, w, 7, rng)
-    alpha = np.clip((patches - 0.25) * 2.2, 0.0, 1.0) * strength
+    # Large-scale exclusion: entire areas get little/no dirt.
+    large = _smooth_noise(h, w, max(8, min(h, w) // 4), rng)
+    large_mask = np.clip((large - 0.4) / 0.35, 0.0, 1.0)
+    alpha = np.clip((patches - 0.25) * 2.2, 0.0, 1.0) * large_mask * strength
     color = np.array([60, 50, 40], np.float32)  # BGR brownish
     rgba = np.zeros((h, w, 4), np.uint8)
     rgba[..., :3] = color

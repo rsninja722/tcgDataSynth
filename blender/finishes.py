@@ -27,17 +27,15 @@ from typing import Optional, Tuple
 
 import bpy
 
+import config
+
 THIN_FILM_MIN_NM = 100.0
 THIN_FILM_MAX_NM = 1500.0
 THIN_FILM_IOR = 1.45
 
 _TWO_PI = 6.28318530718
-# Diffraction-flash holo tuning.
-HOLO_ANGLE_GAIN = 12.0     # how fast the flash bands move as the view angle changes
-HOLO_PATTERN_GAIN = 4.0    # how much the pattern offsets each region's flash phase
-HOLO_SHARPNESS = 4.0       # flash threshold: higher = narrower, more selective flashes
-HOLO_EMIT = 1.6            # peak flash brightness (localised, so no global washout)
-HOLO_DARKEN = 0.18         # slight darkening of the base between flashes
+# Diffraction-flash holo tuning lives in config.json ["holo"] (config.load_holo_tuning);
+# loaded at material-build time so it can be tuned without editing code.
 
 
 # --------------------------------------------------------------------------- #
@@ -228,7 +226,8 @@ def _spectral_ramp(nt):
 
 def make_holo_spectral(name: str, card_image_path: Optional[str],
                        pattern_img_path: str, pattern_normal_path: Optional[str],
-                       picture_region, region_mode: str, pattern_name: str, seed: int = 0):
+                       picture_region, region_mode: str, pattern_name: str, seed: int = 0,
+                       physical_normal_path: Optional[str] = None):
     """Version 2 — DIFFRACTION-FLASH holo (angle-selective, thresholded).
 
     Real holo is a diffraction grating: only regions whose local structure aligns the
@@ -240,6 +239,13 @@ def make_holo_spectral(name: str, card_image_path: Optional[str],
       base    = art, darkened between flashes; emission = ramp*f (localised, no washout)
     Responds to CAMERA/CARD angle (surface shaders can't read light directions).
     Only the LINE pattern is physically raised (pattern normal -> shading normal)."""
+    tune = config.load_holo_tuning()
+    angle_gain = tune["angle_gain"]
+    pattern_gain = tune["pattern_gain"]
+    sharpness = tune["sharpness"]
+    emit = tune["emit"]
+    darken = tune["darken"]
+
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     nt = mat.node_tree
@@ -251,9 +257,13 @@ def make_holo_spectral(name: str, card_image_path: Optional[str],
     bsdf.inputs["Coat Weight"].default_value = 0.4
     bsdf.inputs["Coat Roughness"].default_value = 0.05
 
-    # Only the physical LINE layer is raised; flat holo patterns get NO normal bump.
-    raised = pattern_name == "horizontal_lines"
-    nsock = _pattern_normal(nt, pattern_normal_path) if raised else None
+    # Raised shading normal: the §3.4 physical-texture (etched foil) if provided is the
+    # main raised layer; otherwise only the LINE pattern is raised (flat holo patterns
+    # stay flat -> no fake bumps).
+    phys = _pattern_normal(nt, physical_normal_path, strength=0.6) if physical_normal_path else None
+    line_n = (_pattern_normal(nt, pattern_normal_path)
+              if (pattern_name == "horizontal_lines" and phys is None) else None)
+    nsock = phys if phys is not None else line_n
     if nsock is not None:
         nt.links.new(nsock, bsdf.inputs["Normal"])
 
@@ -265,15 +275,15 @@ def make_holo_spectral(name: str, card_image_path: Optional[str],
     nt.links.new(geom.outputs["Incoming"], dot.inputs[1])
 
     pat = _image_tex(nt, pattern_img_path, non_color=True)
-    # phase P = facing*ANGLE_GAIN + pattern*PATTERN_GAIN
+    # phase P = facing*angle_gain + pattern*pattern_gain
     phase = _math(nt, "ADD",
-                  _math(nt, "MULTIPLY", dot.outputs["Value"], HOLO_ANGLE_GAIN),
-                  _math(nt, "MULTIPLY", pat.outputs["Color"], HOLO_PATTERN_GAIN))
-    # flash f = pow(0.5 + 0.5*cos(P*2pi), SHARPNESS)
+                  _math(nt, "MULTIPLY", dot.outputs["Value"], angle_gain),
+                  _math(nt, "MULTIPLY", pat.outputs["Color"], pattern_gain))
+    # flash f = pow(0.5 + 0.5*cos(P*2pi), sharpness)
     band = _math(nt, "ADD",
                  _math(nt, "MULTIPLY",
                        _math(nt, "COSINE", _math(nt, "MULTIPLY", phase, _TWO_PI)), 0.5), 0.5)
-    flash = _math(nt, "POWER", band, HOLO_SHARPNESS)
+    flash = _math(nt, "POWER", band, sharpness)
     # hue = FRACT(P) -> spectral ramp
     ramp = _spectral_ramp(nt)
     nt.links.new(_math(nt, "FRACT", phase), ramp.inputs["Fac"])
@@ -284,14 +294,14 @@ def make_holo_spectral(name: str, card_image_path: Optional[str],
     # mask * DARKEN * (1 - flash).
     art = (_image_tex(nt, card_image_path, False).outputs["Color"]
            if card_image_path and os.path.isfile(card_image_path) else _rgb(nt, (0.5, 0.5, 0.5)))
-    darkfac = _math(nt, "MULTIPLY", _math(nt, "MULTIPLY", mask, HOLO_DARKEN),
+    darkfac = _math(nt, "MULTIPLY", _math(nt, "MULTIPLY", mask, darken),
                     _math(nt, "SUBTRACT", _value(nt, 1.0), flash))
     nt.links.new(_mix_rgb(nt, darkfac, art, _rgb(nt, (0.0, 0.0, 0.0))),
                  bsdf.inputs["Base Color"])
 
-    # Localised rainbow flash as emission: strength = mask * flash * EMIT.
+    # Localised rainbow flash as emission: strength = mask * flash * emit.
     nt.links.new(ramp.outputs["Color"], bsdf.inputs["Emission Color"])
-    nt.links.new(_math(nt, "MULTIPLY", _math(nt, "MULTIPLY", mask, flash), HOLO_EMIT),
+    nt.links.new(_math(nt, "MULTIPLY", _math(nt, "MULTIPLY", mask, flash), emit),
                  bsdf.inputs["Emission Strength"])
 
     _apply_anisotropy(nt, bsdf, pattern_name)
@@ -300,7 +310,8 @@ def make_holo_spectral(name: str, card_image_path: Optional[str],
 
 
 def make_holo(name: str, version: str, card_image_path, pattern_img_path,
-              pattern_normal_path, picture_region, region_mode, pattern_name, seed=0):
+              pattern_normal_path, picture_region, region_mode, pattern_name, seed=0,
+              physical_normal_path=None):
     if version == "thinfilm":
         return make_holo_thinfilm(name, card_image_path, pattern_img_path,
                                   pattern_normal_path, picture_region, region_mode,
@@ -308,5 +319,5 @@ def make_holo(name: str, version: str, card_image_path, pattern_img_path,
     if version == "spectral":
         return make_holo_spectral(name, card_image_path, pattern_img_path,
                                   pattern_normal_path, picture_region, region_mode,
-                                  pattern_name, seed)
+                                  pattern_name, seed, physical_normal_path=physical_normal_path)
     raise ValueError(f"bad holo version {version!r}")

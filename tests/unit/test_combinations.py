@@ -144,6 +144,17 @@ def test_normal_finish_has_no_holo_fields():
             assert c.finish.physical_texture is False
 
 
+def test_physical_texture_pairs_with_none_pattern():
+    seen_physical = False
+    for seed in range(300):
+        cfg = _sample(seed, finishes=["holo"], layouts=["table"])
+        for c in cfg.cards:
+            if c.finish.physical_texture:
+                seen_physical = True
+                assert c.finish.holo_pattern == "none", c.finish
+    assert seen_physical, "expected some physical-texture cards in the sample"
+
+
 def test_holo_pattern_restriction():
     for seed in range(60):
         cfg = _sample(seed, finishes=["holo"], holo_patterns=["cosmos"], layouts=["table"])

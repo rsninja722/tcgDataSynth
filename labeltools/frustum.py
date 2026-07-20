@@ -61,6 +61,7 @@ def classify(
     card_id: str,
     ndc_corners: Sequence[Ndc],
     front_visible: bool,
+    holo_tag: str = "none",
 ) -> Tuple[Optional[CardLabel], str]:
     """Decide whether to label. ndc_corners are the 4 ideal corners in
     KEYPOINT_ORDER (TL,TR,BR,BL) as Blender camera-view coords.
@@ -73,4 +74,4 @@ def classify(
     if not all(corner_in_frustum(x, y, z) for (x, y, z) in ndc_corners):
         return None, "corner-out-of-frustum"
     corners_yolo: List[Tuple[float, float]] = [ndc_to_yolo(x, y) for (x, y, _z) in ndc_corners]
-    return CardLabel(card_id, tuple(corners_yolo)), "labeled"
+    return CardLabel(card_id, tuple(corners_yolo), holo_tag=holo_tag), "labeled"

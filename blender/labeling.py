@@ -45,11 +45,13 @@ def label_card(
     obj,
     card_id: str,
     corners_local: Optional[Sequence[Vector]] = None,
+    holo_tag: str = "none",
 ) -> Tuple[Optional[CardLabel], str, List[Tuple[int, float, float, float, bool]]]:
     """Return (CardLabel|None, reason, debug_rows) for one card object.
 
     reason ∈ {'labeled','back-facing','corner-out-of-frustum'}. debug_rows are
     (corner_index, ndc_x, ndc_y, ndc_z, in_frustum) for logging/inspection.
+    holo_tag (none|full|holo|reverse) is written into the label.
     """
     corners_local = corners_local or ideal_corners_local()
     mw = obj.matrix_world
@@ -63,5 +65,5 @@ def label_card(
         ndc_corners.append((v.x, v.y, v.z))
         in_f = (0.0 <= v.x <= 1.0) and (0.0 <= v.y <= 1.0) and (v.z > 1e-6)
         debug_rows.append((i + 1, v.x, v.y, v.z, in_f))
-    label, reason = classify(card_id, ndc_corners, front_visible)
+    label, reason = classify(card_id, ndc_corners, front_visible, holo_tag=holo_tag)
     return label, reason, debug_rows

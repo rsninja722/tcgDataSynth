@@ -246,9 +246,67 @@ runs in Blender 5.0 and reports back. Pure-Python modules are unit-tested in Doc
         Localised flashes → no washout; shifts with camera/card angle. LIMITATION: surface
         shader can't read light dirs → responds to view/card angle only (offer specular
         variant for light-angle later). Tuning consts at top of finishes.py. **Awaiting run.**
-      NEXT: tune flash consts from renders; wire physical-texture (§3.4 etched) normal as the
-        separate RAISED layer; then damage compositing in card_factory. 60/60 unit tests.
-- [ ] Phase 4 — layouts (table→floating→binder→display case→hand)
+      - Holo flash magic numbers moved to hand-editable `holo_tuning.json` (project root);
+        `config.load_holo_tuning()` merges over DEFAULT_HOLO_TUNING (bad/missing → defaults);
+        finishes.make_holo_spectral loads it at build time (edit JSON, re-run, no code change).
+        Tested test_config.py 3/3.
+      - PHYSICAL TEXTURE + DAMAGE WIRED (t07, awaiting user run). `texturegen/cardprep.py`
+        (bpy-free, cv2, tests 3/3): physical_normal_path() = §3.4 etched normal from card art
+        (cached per card ID); damaged_card_path() = dirt/scratches/surface composited (per
+        INSTANCE via seed, cached per (card,seed)). finishes.make_holo_spectral gained
+        physical_normal_path (etched foil = main RAISED layer; supersedes line-pattern normal;
+        flat patterns stay flat). make_normal_material already applies physical normal.
+        `tests/t07_finish_damage.py`: normal_plain/physical/damage + holo_cosmos_phys_damage +
+        holo_lines. Requires cv2 in Blender.
+      NOTE: t07 overrides the front material manually; PHASE 4 scene builder will orchestrate
+        finish+damage+physical per SceneConfig (finish/damage come from rules/combinations).
+      **Phase 3 essentially COMPLETE** pending t07 visual OK. 67/67 unit tests.
+      - Tuning round (user): (1) dirt now has a LARGE-scale exclusion mask (whole regions
+        clean, not uniform). (2) physical texture = clean evenly-spaced streamlines
+        (traced_lines, Jobard-Lefebvre style: 1px AA lines, spacing=3 → 1px line + 2px gap,
+        following high-contrast contours) — replaced the noisy LIC. (3) NEW RULE:
+        physical_texture ALWAYS pairs with holo_pattern 'none' (combinations.py _sample_finish
+        + validate + test). t07 holo case updated to none+physical accordingly.
+- [~] **Phase 4 — layouts (table→floating→binder→display case→hand). STARTED.**
+      Integration core `blender/scene_builder.py`: build_card_instance(CardConfig) assembles
+      full card = damaged front + physical normal (cardprep) + finish (finishes normal/holo) +
+      base unit + protection (sleeve/toploader/semirigid/slab, nested with inner offset). Returns
+      CardInstance(root=what layout positions, card=what gets labeled). cv2-in-Blender required
+      (falls back to plain texture). `blender/layouts.py` build_table: bg plane (noisy mat) +
+      clutter rects + cards laid flat. `tests/t08_table.py`: samples table SceneConfig, builds,
+      labels all, LAST card shoved half-out-of-frame for frustum-rule test. **Awaiting user run.**
+      - t08 run1: labeling/frustum/backface CORRECT. Fix (user): slab clipped neighbors
+        (grid was card-sized). Added scene_builder.protection_footprint() +
+        protection_half_thickness(); build_table now spaces by max footprint DIAGONAL + gap
+        (protection-aware, ~non-overlapping, small jitter) and lifts each object by half its
+        thickness so a 6.7mm slab rests ON the table. Camera subject_h 0.30→0.40.
+      - t08 run2 GOOD. Added config.json scene params (max_cards, allow_overlap,
+        out_of_frustum keep/remove); t08 reads them.
+      - HOLO TAG added to labels (|<id>|<tag>). t08 now builds a DELIBERATE demo scene:
+        4 in-frustum cards one of each tag (none/full/holo/reverse) + 1 shoved out.
+        **Re-run t08 + visualizer to confirm tags in the label file.**
+      - FLOATING (t09) DELIVERED — awaiting user run. layouts.build_floating: bg plane far
+        back + scattered prism(cube)/cylinder props (bpy.ops primitives) behind cards; cards
+        float at varied depth (z -0.10..0.04) + tilt (rx,ry ±0.8, rz full), back_to_camera
+        flips. tests/t09_floating.py samples floating config, labels all (holo tags),
+        respects config scene params. Camera front-ish.
+      - t09 run1: layout fine. Changes (user): config now PER-LAYOUT (floating gets
+        max_cards/max_shapes/allow_overlap/out_of_frustum). PURPLE holo investigation: t09
+        rebuilt as ALL-holo cards each in sleeve OR toploader, VARIED region/pattern, at
+        floating angles. Hypothesis: t08's uniform purple = 'none' pattern → uniform phase →
+        one hue whole card (not plastic). t09 uses cosmos/lines/water_web → should show varied
+        flashes; if still uniform-tinted only on TOPLOADER cards → the toploader tint
+        (0.9,0.92,0.95 in scene_builder._add_protection) is the culprit.
+      - t09 run2 diagnosis (user): sleeve/toploader REFRACTIVE glass (IOR 1.5) TIR-traps the
+        holo card's EMISSION → amplified saturation + whole-card reflect at angles (only over
+        self-lit holo; fine over lit-diffuse cards = why unsleeved t06 was good). FIX:
+        make_clear_plastic + make_toploader_plastic rewritten NON-REFRACTIVE = Transparent
+        BSDF (straight-through) mixed by Fresnel with Glossy reflection (_clear_plastic_graph
+        + _reflect_node w/ Glossy→Principled-mirror fallback); wear still drives glossy
+        roughness. scene_builder holder tint softened to (0.97,0.98,1.0). CHANGES SLEEVE/
+        TOPLOADER EVERYWHERE (re-verify t03/t04 normal-card look). **Awaiting user run.**
+      NEXT layouts: binder, display case, hand. Then Phase 5 (lighting/camera random),
+      6 (postfx), 7 (GUI), 8 (throughput).
 - [ ] Phase 5 — lighting & camera randomization
 - [ ] Phase 6 — post effects (postfx)
 - [ ] Phase 7 — GUI + orchestration
@@ -277,6 +335,18 @@ runs in Blender 5.0 and reports back. Pure-Python modules are unit-tested in Doc
   showed ['NONE'] because it's a dynamic OCIO enum; AgX/Standard/Filmic exist at runtime.
 - Default render was 1920x1080 → we force 1280x1280.
 
+## Central config — config.json (single source of tunable params)
+`config.json` (project root) holds ALL runtime-tunable params; `config.load_config()`
+deep-merges over `DEFAULT_CONFIG` with type coercion + fallback (bad edit never crashes).
+Sections: `holo` (angle_gain/pattern_gain/sharpness/emit/darken — finishes.make_holo_spectral
+via `load_holo_tuning()`) and `scene` (max_cards, allow_overlap, out_of_frustum
+'keep'|'remove' — via `load_scene_params()`). Renamed from holo_tuning.json (2026-07-20).
+Now PER-LAYOUT under `layouts` (table, floating, ...). `load_layout_params(name)` returns
+that layout's params (recursive deep-merge, per-layout enum validation). floating adds
+`max_shapes`. Wired: sample_scene_config(max_cards=), build_table/build_floating(allow_overlap,
+max_shapes), t08/t09 read load_layout_params + honor out_of_frustum. ADD FUTURE TUNABLES HERE
+(new layout = new entry under "layouts").
+
 ## Texture variation (IMPORTANT for dataset diversity)
 Pre-baked warp/wear maps are FEW shared datablocks. To avoid identical
 reflection/scratch patterns across the dataset, every plastic instance samples a
@@ -295,6 +365,9 @@ so memory stays flat regardless of instance count.
 - Meters, real-world scale. Card = 0.063 × 0.088 × 0.00045 m. Corner radius 3mm.
 - Single seeded `numpy.random.Generator` threaded everywhere; no bare `random.*`.
 - Every image reproducible from one int seed (seed in filename/manifest).
-- Labels: YOLO-pose, class 0, `class cx cy w h (xi yi vi)*4 |<card_id>`; Y flipped to
-  top-left origin; points with camera-space z<0 (behind camera) count as OUTSIDE frustum.
+- Labels: YOLO-pose, class 0, `class cx cy w h (xi yi vi)*4 |<card_id>|<holo_tag>`; Y
+  flipped to top-left origin; points with camera-space z<0 (behind camera) = OUTSIDE
+  frustum. holo_tag: none|full(entire)|holo(picture)|reverse — from finish region via
+  scene_builder.holo_tag_for_finish; threaded label_card→frustum.classify→CardLabel.
+  Standard (no-suffix) variant omits both bars.
 - Docker-side pure-python tests live in `tests/unit/`; Blender scripts in `tests/tXX_*.py`.

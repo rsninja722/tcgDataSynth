@@ -70,7 +70,8 @@ def draw_label(img: np.ndarray, parsed: ParsedLabel) -> np.ndarray:
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
     if parsed.card_id:
-        cv2.putText(img, parsed.card_id, (x0, max(0, y0 - 6)),
+        tag = f" [{parsed.holo_tag}]" if parsed.holo_tag else ""
+        cv2.putText(img, parsed.card_id + tag, (x0, max(0, y0 - 6)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, _BBOX_COLOR, 1, cv2.LINE_AA)
     return img
 
