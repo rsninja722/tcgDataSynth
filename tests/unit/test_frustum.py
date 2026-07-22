@@ -77,18 +77,56 @@ def test_back_facing_not_labeled():
     assert label is None and reason == "back-facing"
 
 
-def test_corner_out_of_frame_not_labeled():
-    ndc = card_ndc(offset_x=0.2)  # shove right until a corner exits x>1
-    xs = [c[0] for c in ndc]
-    assert max(xs) > 1.0, f"test setup: expected a corner past the right edge, got {xs}"
+def test_partial_card_when_some_corners_out():
+    ndc = card_ndc(offset_x=0.2)  # shove right until the 2 right corners exit x>1
+    in_flags = [frustum.corner_in_frustum(x, y, z) for (x, y, z) in ndc]
+    assert 0 < sum(in_flags) < 4, f"test setup: expected a partial, got {in_flags}"
     label, reason = frustum.classify("x", ndc, front_visible=True)
-    assert label is None and reason == "corner-out-of-frustum"
+    assert reason == "labeled-partial" and label is not None
+    assert label.class_id == config.PARTIAL_CLASS_ID
+    assert config.PARTIAL_KPT_RANGE[0] <= len(label.corners) <= config.PARTIAL_KPT_RANGE[1]
+    # At least TWO keypoints lie on the frustum boundary (a component == 0 or 1).
+    on_edge = [c for c in label.corners
+               if min(c) <= 1e-6 or max(c) >= 1.0 - 1e-6]
+    assert len(on_edge) >= 2, f"expected >=2 on-edge crossing points, got {on_edge}"
+
+
+def test_partial_covers_frustum_corner():
+    # Card straddles the top-right frustum corner: only BL is in-frame, but the card
+    # COVERS the (1,1) corner. The visible outline must include that frame corner as a
+    # keypoint (a point interior to the card that lands on the frame corner).
+    ndc = [(0.6, 1.3, 0.3), (1.3, 1.3, 0.3), (1.3, 0.6, 0.3), (0.6, 0.6, 0.3)]  # TL,TR,BR,BL
+    label, reason = frustum.classify("x", ndc, front_visible=True)
+    assert reason == "labeled-partial" and label is not None
+
+    def on_corner(c):
+        return (min(c[0], 1.0 - c[0]) <= 1e-6) and (min(c[1], 1.0 - c[1]) <= 1e-6)
+    assert any(on_corner(c) for c in label.corners), \
+        f"expected a covered frame-corner keypoint, got {label.corners}"
+    # The visible region here is a 4-gon (1 card corner + 2 crossings + 1 frame corner).
+    assert len(label.corners) >= 4
+
+
+def test_partial_spanning_band_labeled_even_with_no_corner_inside():
+    # A wide/short card whose 4 corners are all outside, but it spans a band across the
+    # frame (covers 2 frame corners). Still partially visible -> labeled.
+    ndc = [(-0.2, 0.7, 0.3), (1.2, 0.7, 0.3), (1.2, 0.3, 0.3), (-0.2, 0.3, 0.3)]
+    assert all(not frustum.corner_in_frustum(x, y, z) for (x, y, z) in ndc)
+    label, reason = frustum.classify("x", ndc, front_visible=True)
+    assert reason == "labeled-partial" and len(label.corners) >= 4
+
+
+def test_fully_out_not_labeled():
+    ndc = card_ndc(offset_x=0.8)  # shove right until EVERY corner exits x>1
+    assert all(not frustum.corner_in_frustum(x, y, z) for (x, y, z) in ndc)
+    label, reason = frustum.classify("x", ndc, front_visible=True)
+    assert label is None and reason == "fully-out-of-frustum"
 
 
 def test_behind_camera_not_labeled():
     ndc = [(0.5, 0.5, -0.1)] * 4  # z<0 => behind camera
     label, reason = frustum.classify("x", ndc, front_visible=True)
-    assert label is None and reason == "corner-out-of-frustum"
+    assert label is None and reason == "fully-out-of-frustum"
 
 
 def test_corner_in_frustum_bounds():

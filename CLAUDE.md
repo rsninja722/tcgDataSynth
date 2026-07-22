@@ -48,7 +48,9 @@ runs in Blender 5.0 and reports back. Pure-Python modules are unit-tested in Doc
   device". Fix: `export TMPDIR=<scratchpad>/piptmp; export PIP_CACHE_DIR=$TMPDIR/cache`
   and use `pip install --break-system-packages --no-cache-dir`. Overlay `/` has ~950G.
 - `python3 -m venv` fails (no ensurepip); using system Python + `--break-system-packages`.
-- Installed for Docker tests: numpy 2.4.6, opencv 5.0.0 (headless), pillow 12.3.0.
+- Installed for Docker tests: numpy 2.4.6, opencv 5.0.0 (headless), pillow 12.3.0,
+  shapely 2.1.2 (polygon boolean for the occlusion label pass; also needed in Blender's
+  Python at gen-time for occlusion carving — else carving is skipped).
 - Pure-python unit tests: `python3 tests/unit/test_*.py` (also pytest-compatible).
 
 ## Phase status
@@ -328,6 +330,17 @@ runs in Blender 5.0 and reports back. Pure-Python modules are unit-tested in Doc
         BEHIND the camera (setup_reflection_lighting) so they show only as reflections. t11
         now renders 4 scenes covering ALL grids(1x1/2x2/3x3/4x3) × page(clear/solid) ×
         content(slab/toploader/sleeved).
+      - t11 v4 (user, anti-overfitting on slot dividers): (1) divider bars no longer run
+        to the page rim — inset by `edge_inset = pad` so they stop at the card-grid
+        boundary (v_len = page_h - 2*pad, h_len = page_w - 2*pad). Removes the continuous
+        border rectangle + the +-shaped crossings at page corners/edges (a reliable
+        landmark). (2) ~25% of divider lines dropped at random (Bernoulli(0.25) per line
+        via scene rng, drop_p=0.25) so the seam grid isn't a dependable cue. Both in
+        _build_binder_page. **Awaiting user re-run of t11.**
+      - t11 v5 (user): (1) grid string is now WIDTH x HEIGHT — build_binder parses
+        `cols, rows = grid.split("x")` so "4x3" = 4 wide x 3 tall (was 3 wide x 4 tall;
+        square grids unaffected). (2) 50% of pages have NO dividers at all — whole weld
+        block gated behind `rng.random() < 0.5` in _build_binder_page.
       - t11 v3 (user): (1) WELDED slot dividers — thin frosted bars (_weld_material) at slot
         midpoints/edges (vertical cols+1, horizontal rows+1) making separate slots. (2) Spine
         now CENTERED with TWO cover halves (_empty pivots at spine edges); content page on the
@@ -335,7 +348,67 @@ runs in Blender 5.0 and reports back. Pure-Python modules are unit-tested in Doc
         all half objects parented to pivot in local coords). (4) Reused table backdrop
         (_plane+_noisy_material behind, no clutter). build_binder now returns (instances,extent).
         **Awaiting user run.**
-      NEXT layouts: display case, hand. Then Phase 5 (lighting/camera random),
+      - DISPLAY CASE (t12) DELIVERED — awaiting user run. layouts.build_display_case:
+        random-material base (_solid or _noisy) + TIGHT aligned grid (cols from params,
+        rows derived from card count so it's robust to trimming) of toploader/slab cards,
+        all flat OR all tilted forward 25deg (rx=-tilt toward the front-above camera;
+        forward tilt shrinks the y-pitch by cos(tilt)) + a scratched/smudged CLEAR cover
+        10cm above (reuses prot.make_toploader_plastic = clear body + wear map → roughness,
+        per-instance random_uv_xform). Returns (instances, extent). MAX 24 CARDS (user):
+        combinations.DISPLAY_CASE_MAX_CARDS=24, _display_case caps n=min(cols*rows,24) and
+        recomputes rows (last row may be partial = one empty corner); validate_scene_config
+        asserts ≤24. config.py/json gained a `display_case` layout block (max_cards 24,
+        out_of_frustum). Unit test test_display_case_capped_at_24_cards (300 seeds, cap
+        reached, grid params consistent) → combinations 22/22. tests/t12_display_case.py =
+        4 scenes (toploader flat 5x5→24 / toploader tilt 4x3 / slab flat 3x3 / slab tilt
+        4x4); scene 0 shoves the last card out of frame for the frustum-rule check.
+      - t12 fix (user: cards upside-down + tilted cards clip through the base): tilt was
+        rx=-tilt about the card CENTER → top(+Y, art-top) edge rotated DOWN into the base
+        (reads upside-down + clips). Now rx=+tilt HINGED about the BOTTOM(-Y) edge resting
+        on the base (center-rotate + compensating translation: loc_y = cy -(fh/2)(1-cos t)
+        -ht·sin t, loc_z = (fh/2)sin t + ht·cos t + eps), so bottom edge stays planted and
+        the top lifts UP toward the camera, art right-side-up. fh/ht are per-card (a case
+        can mix toploaders+slabs). Verified numerically (bottom z≈0, top highest). Flat
+        (tilt=0) unchanged. **Awaiting user re-run of t12.**
+      - t12 case body (user, CONFIRMED rotation good): (1) added 4 SIDE WALLS (boxes,
+        4mm, same material as the base) connecting base (z=0) up to the cover
+        (z=_CASE_COVER_HEIGHT=10cm); base material now built ONCE (case_mat) and reused
+        for base+walls. (2) COVER is now a REAL 6mm-thick acrylic BOX (_box, not a plane),
+        resting on the walls, via make_slab_surface (real transmission — flat parallel lid
+        refracts cleanly) with a faint cool TINT (not perfectly clear) + denser/higher-res
+        scratches. (3) NEW wear asset family assets/case_cover_wear_{0..5}.png = 2048²
+        (vs toploader 1024²), higher density (nonzero ~0.65 vs ~0.28) — texturegen/
+        surface_wear.generate_case_cover_wear (n_scratches 3200, n_dust 1600); baked via
+        `python3 texturegen/surface_wear.py` (its __main__; does NOT touch toploader_wear).
+        t12 camera reframed to include the 10cm case height (subject_h=extent+0.10,
+        target z=0.05). test_surface_wear 3/3 (added denser+higher-res assertion).
+      - t12 case body v2 (user): (1) SCRATCHES too big → now SMALL + numerous:
+        generate_scratch_dust gained len_frac/blur params; generate_case_cover_wear =
+        12000 scratches (was 3200), SHORT (len_frac 0.4-3% of width, was 3-45%); cover
+        material maps the near-FULL 2048 texture (random_uv_xform gained win_range, cover
+        uses (0.9,1.0)) so hairlines aren't magnified. Re-baked case_cover_wear_{0..5}.
+        (2) CASE TOO TALL → height now DYNAMIC: cover sits _CASE_HEADROOM=40mm above the
+        tallest item's top-AFTER-ROTATION (top_z tracked in the card loop; case_height =
+        top_z+0.040; walls built AFTER the loop; cover box bottom at case_height). Verified
+        40mm headroom for flat/tilted slab+toploader. (3) LESS BLUR through the lid:
+        make_slab_surface roughness base 0.04→0.02, wear 0.5→0.18 (clear glass, only fine
+        scratches catch light). t12 reframed (subject_h=extent+0.08, target z=0.04).
+      - t12 case body v3 (user): (1) THREE case camera zooms in t12 (case_camera): 'out'
+        (target_frac 0.30, whole case small), 'full' (0.82, default), 'in' (subject_h 0.18,
+        just a few cards). Scene 0 rendered at all three (SAME built scene, swap cam+lights
+        via _clear_cams_lights); zoomed-in view showcases partial_card labels. (2) 20% chance
+        of a stray card ON TOP of the lid at random pos/angle, any of none/sleeve/toploader/
+        slab via new rules.combinations.sample_top_card (+DISPLAY_CASE_TOP_PROTECTIONS);
+        placed in build_display_case above cover_top, labeled like any instance. (3) PROGRAM-
+        WIDE partial_card labeling (see Conventions/labels).
+      - t12 case body v4 (user): (1) TOP-CARD positioning redone — its CENTER is drawn
+        uniformly within the cover's four corners (±case_w/2, ±case_h/2), and it lies FLAT
+        on the lid (z = cover_top + ht + eps, NO tilt/lift) so it never floats and may hang
+        partly off an edge. (Earlier half-diagonal-inset + tilt+lift version floated it.)
+        (2) added a large noisy TABLE plane at z=-0.003 BELOW the case (like the binder
+        scene). Built LAST (after the top-card rng draws) so it doesn't shift which scenes
+        roll the 20% top card. **Awaiting user re-run of t12.**
+      NEXT layouts: hand. Then Phase 5 (lighting/camera random),
       6 (postfx), 7 (GUI), 8 (throughput).
 - [ ] Phase 5 — lighting & camera randomization
 - [ ] Phase 6 — post effects (postfx)
@@ -382,7 +455,8 @@ Pre-baked warp/wear maps are FEW shared datablocks. To avoid identical
 reflection/scratch patterns across the dataset, every plastic instance samples a
 random cropped/zoomed/flipped sub-region via a Mapping node
 (`protection.random_uv_xform(rng)` -> `_apply_uv_mapping`), AND picks a random base
-map (6 each: assets/plastic_warp_{0..5}, toploader_wear_{0..5}). Mapping applies
+map (6 each: assets/plastic_warp_{0..5}, toploader_wear_{0..5}; display-case cover
+uses case_cover_wear_{0..5} = 2048², denser). Mapping applies
 result=win*uv+loc, so win<1 (0.3-0.6) zooms IN to a sub-window; the window is kept
 fully within [0,1] (incl. flips) + texture EXTEND so it NEVER crosses a tile
 boundary (fixes a hard reflection seam). Offset/scale/flip only (no rotation) so
@@ -395,9 +469,39 @@ so memory stays flat regardless of instance count.
 - Meters, real-world scale. Card = 0.063 × 0.088 × 0.00045 m. Corner radius 3mm.
 - Single seeded `numpy.random.Generator` threaded everywhere; no bare `random.*`.
 - Every image reproducible from one int seed (seed in filename/manifest).
-- Labels: YOLO-pose, class 0, `class cx cy w h (xi yi vi)*4 |<card_id>|<holo_tag>`; Y
-  flipped to top-left origin; points with camera-space z<0 (behind camera) = OUTSIDE
-  frustum. holo_tag: none|full(entire)|holo(picture)|reverse — from finish region via
-  scene_builder.holo_tag_for_finish; threaded label_card→frustum.classify→CardLabel.
-  Standard (no-suffix) variant omits both bars.
+- Labels: **CUSTOM occlusion-aware format (2026-07-22 user), replaces YOLO-pose output.**
+  Line: `<class> <rb1x> <rb1y> <rb2x> <rb2y> (x y flag)* |<card_id>|<holo_tag>` where
+  (rb1,rb2) = min/max bbox corners; flag 1=TL 2=TR 3=BL 4=BR original corner, 5=created
+  (frustum crossing / covered frame corner / occlusion vertex). Points in CLOCKWISE
+  perimeter order starting at the lowest-rank present corner; missing corners just absent;
+  polygon may be CONCAVE. Writer/parser: labeltools.yolo_pose.PolyLabel/parse_poly_line/
+  write_poly_label_file. Visualizer: draw_poly_label (flag-colored pts, magenta=created).
+  TWO-PASS pipeline in blender.labeling.label_scene(scene,cam,instances)->[(inst,PolyLabel|
+  None,reason)]: pass 1 = frustum visible bound (labeltools.occlusion.compute_bound via
+  shapely: card_quad ∩ frustum square); pass 2 = OCCLUSION — every card is also an occluder
+  (blender.labeling.occluder_quads_world: bare=card rect, sleeve=sleeve rect, toploader/
+  semirigid/slab=BOTH plastic layers), and a card's bound is CARVED (shapely difference)
+  by each NEARER (smaller camera depth) rectangle covering >25% of its CURRENT bound;
+  carving repeats per occluder, can remove corners + add flag-5 pts, may go concave/hole-
+  bridged. class 0/1 = frustum full/partial (occlusion doesn't change class). Coplanar grid
+  cards don't carve (equal depth). **shapely REQUIRED at gen-time for carving** (install into
+  Blender's Python like cv2); without it occlusion is skipped (frustum bound only). All
+  layout tests (t08/09/11/12) use label_scene + write_poly_label_file. CardInstance gained
+  `.protection`. Legacy CardLabel/frustum.classify/write_label_file kept for unit tests.
+  Y flipped to top-left origin; points with camera-space z<0 (behind camera) = OUTSIDE.
+  **TWO classes (2026-07-22):** class 0 `card` = ALL 4 corners in frustum → 4 keypoints
+  (TL,TR,BR,BL); class 1 `partial_card` = card only PARTLY in frame → keypoints are the
+  exact outline of the VISIBLE region = polygon (card quad) ∩ (frustum square), via
+  Sutherland-Hodgman (frustum._clip_to_unit_square). Vertices = surviving card corners +
+  card-edge/frame-edge crossings + ANY FRAME CORNER the card covers (a point interior to
+  the card that lands on a frame corner — needed so the outline fully contains the visible
+  shape; user 2026-07-22). VARIABLE count (up to 8); boundary vertices have a normalized
+  component == 0 or 1. No frame overlap → NOT labeled ('fully-out-of-frustum'); a corner
+  BEHIND the camera with no in-front in-frame corner → treated as out (2D projection
+  invalid). Back-facing → NOT labeled. Reasons: labeled|labeled-partial|back-facing|
+  fully-out-of-frustum. config.PARTIAL_CLASS_ID=1, CLASS_NAMES, PARTIAL_KPT_RANGE=(3,8);
+  dataset.yaml kpt_shape stays [4,3] (full-card canonical) + both class names. CardLabel
+  .corners is variable-length. Visualizer draws partial boxes ORANGE + rings on-edge
+  keypoints white. holo_tag: none|full(entire)|holo(picture)|reverse — via
+  scene_builder.holo_tag_for_finish. Standard (no-suffix) variant omits both bars.
 - Docker-side pure-python tests live in `tests/unit/`; Blender scripts in `tests/tXX_*.py`.

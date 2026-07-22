@@ -47,6 +47,21 @@ def test_line_token_count_and_suffix():
     assert "|" not in lab.to_line(include_id=False)
 
 
+def test_partial_card_line_variable_points_and_class():
+    # 3-point partial (class 1): 1 inside corner + 2 boundary crossings.
+    pts = ((0.4, 0.5), (1.0, 0.6), (1.0, 0.4))
+    lab = yp.CardLabel("chase", pts, holo_tag="none", class_id=config.PARTIAL_CLASS_ID)
+    parsed = yp.parse_pose_line(lab.to_line(include_id=True))
+    assert parsed.class_id == config.PARTIAL_CLASS_ID
+    assert len(parsed.corners) == 3 and parsed.visibilities == [2, 2, 2]
+    core = lab.to_line(include_id=False).split()
+    assert len(core) == 5 + 3 * 3          # bbox + 3 kpt triplets
+    # 5-point partial round-trips too.
+    p5 = ((0.2, 0.2), (0.8, 0.2), (1.0, 0.5), (0.8, 0.9), (0.2, 0.9))
+    lab5 = yp.CardLabel("x", p5, class_id=config.PARTIAL_CLASS_ID)
+    assert len(yp.parse_pose_line(lab5.to_line()).corners) == 5
+
+
 def test_parse_roundtrip_with_and_without_id():
     lab = yp.CardLabel("Base_Set_004", ((0.11, 0.22), (0.71, 0.20), (0.73, 0.79), (0.13, 0.81)),
                        holo_tag="reverse")

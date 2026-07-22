@@ -26,6 +26,11 @@
       "_comment": "max_cards caps filled slots. out_of_frustum: keep|remove.",
       "max_cards": 12,
       "out_of_frustum": "keep"
+    },
+    "display_case": {
+      "_comment": "max_cards caps the tight grid (24 max). out_of_frustum: keep|remove.",
+      "max_cards": 24,
+      "out_of_frustum": "keep"
     }
   }
 }

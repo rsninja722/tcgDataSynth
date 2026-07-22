@@ -43,6 +43,7 @@ class CardInstance:
     card_id: str
     objects: List[object]
     holo_tag: str = "none"   # none | full | holo | reverse (written into the label)
+    protection: object = None  # the CardConfig.protection (for occluder-rect geometry)
 
 
 # Region mode -> holo label tag.
@@ -183,4 +184,5 @@ def build_card_instance(name: str, card_cfg, card_img, cache_dir: str, rng) -> C
     root, prot_objs = _add_protection(name, card, card_cfg.protection, rng)
     return CardInstance(root=root, card=card, card_id=card_img.card_id,
                         objects=[card] + prot_objs,
-                        holo_tag=holo_tag_for_finish(card_cfg.finish))
+                        holo_tag=holo_tag_for_finish(card_cfg.finish),
+                        protection=card_cfg.protection)

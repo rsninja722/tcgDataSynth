@@ -38,10 +38,10 @@ from rules.combinations import (SceneConfig, LayoutConfig, CardConfig, Protectio
                                 FinishConfig, DamageConfig, SleeveConfig, validate_scene_config)
 from blender import layouts  # noqa: E402
 from blender import scene_builder as sb  # noqa: E402
-from blender.labeling import label_card  # noqa: E402
+from blender.labeling import label_scene  # noqa: E402
 from blender.render_setup import setup_render  # noqa: E402
 from blender import scene_common as sc  # noqa: E402
-from labeltools.yolo_pose import write_label_file, write_dataset_yaml  # noqa: E402
+from labeltools.yolo_pose import write_poly_label_file, write_dataset_yaml  # noqa: E402
 
 try:
     from texturegen.cardsource import CardLibrary
@@ -122,13 +122,11 @@ def main():
     bpy.context.view_layer.update()
     labels = []
     removed = 0
-    for inst in instances:
-        lbl, reason, _ = label_card(scene, cam, inst.card, inst.card_id,
-                                    holo_tag=inst.holo_tag)
+    for inst, lbl, reason in label_scene(scene, cam, instances):   # occlusion-aware
         print(f"   {inst.card_id:20} tag={inst.holo_tag:8} {reason}")
         if lbl:
             labels.append(lbl)
-        elif reason == "corner-out-of-frustum" and params["out_of_frustum"] == "remove":
+        elif reason == "fully-out-of-frustum" and params["out_of_frustum"] == "remove":
             for obj in inst.objects:      # don't render frustum-excluded cards at all
                 obj.hide_render = True
             removed += 1
@@ -136,7 +134,7 @@ def main():
     out_dir = os.path.join(_ROOT, config.OUTPUT.root)
     scene.render.filepath = os.path.join(out_dir, "t08_table.png")
     bpy.ops.render.render(write_still=True)
-    write_label_file(os.path.join(out_dir, "t08_table.txt"), labels)
+    write_poly_label_file(os.path.join(out_dir, "t08_table.txt"), labels)
     write_dataset_yaml(os.path.join(out_dir, "dataset.yaml"))
     print(f"\n[t08] labeled {len(labels)}/{len(instances)} cards; "
           f"removed {removed} out-of-frustum (mode={params['out_of_frustum']}). "

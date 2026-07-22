@@ -34,6 +34,10 @@ POST_EFFECTS = ("sensor_noise", "compression", "pixel_melt", "white_balance", "t
 BINDER_GRIDS = ("1x1", "2x2", "3x3", "4x3")
 BINDER_CONTENTS = ("sleeved", "toploader", "slab")  # what the binder is sized for
 HAND_GRIPS = ("side", "pinch")
+DISPLAY_CASE_MAX_CARDS = 24   # cap on the display-case grid (user)
+# A decorative card may rest ON TOP of a display case; it can be any of these
+# (NOT semi-rigid), independent of the grid's toploader/slab restriction (user).
+DISPLAY_CASE_TOP_PROTECTIONS = ("none", "sleeve", "toploader", "slab")
 
 HOLDER_MAX_ROT_DEG = 1.0    # max card rotation inside a semi-rigid/toploader (user)
 HOLDER_MAX_OFFSET_MM = 2.0  # max card offset inside a holder
@@ -345,13 +349,29 @@ def _display_case(rng, opts):
     allowed = _allowed_protections_for_layout("display_case", opts)
     cols = int(rng.integers(2, 6))
     rows = int(rng.integers(2, 6))
-    n = cols * rows
+    # Tight grid capped at DISPLAY_CASE_MAX_CARDS (user). Keep `cols`, trim card
+    # count, and recompute `rows` so the last row may be partial (an empty corner).
+    n = min(cols * rows, DISPLAY_CASE_MAX_CARDS)
+    rows = (n + cols - 1) // cols
     tilt = _maybe(rng, 0.5)
     cards = [_make_card(rng, opts, i, _choice(rng, allowed), allow_back=False)
              for i in range(n)]
     params = {"cols": cols, "rows": rows, "tilt_forward": tilt,
               "tilt_deg": 25.0 if tilt else 0.0, "cover_scratches": True}
     return LayoutConfig("display_case", params), cards
+
+
+def sample_top_card(rng, enabled_options=None) -> CardConfig:
+    """Sample ONE decorative card (none/sleeve/toploader/slab) to rest on top of a
+    display case. Honors per-card legality (sleeve presence/type/size) via the same
+    path as scene cards, but is NOT limited to the grid's toploader/slab set.
+    Determinism comes entirely from the caller's `rng`; always front-facing."""
+    opts = _resolve(enabled_options)
+    choices = [p for p in DISPLAY_CASE_TOP_PROTECTIONS if p in opts["protections"]]
+    if not choices:
+        choices = list(DISPLAY_CASE_TOP_PROTECTIONS)
+    kind = _choice(rng, choices)
+    return _make_card(rng, opts, slot_index=-1, protection_kind=kind, allow_back=False)
 
 
 def _hand(rng, opts):
@@ -502,6 +522,8 @@ def validate_scene_config(cfg: SceneConfig) -> None:
     kinds = {c.protection.kind for c in cfg.cards}
     if lk == "display_case":
         assert kinds <= {"toploader", "slab"}, f"display_case has {kinds}"
+        assert len(cfg.cards) <= DISPLAY_CASE_MAX_CARDS, \
+            f"display_case has {len(cfg.cards)} cards (max {DISPLAY_CASE_MAX_CARDS})"
     elif lk == "hand":
         assert kinds <= {"none", "sleeve", "toploader"}, f"hand has {kinds}"
         assert cfg.layout.params.get("grip") in HAND_GRIPS

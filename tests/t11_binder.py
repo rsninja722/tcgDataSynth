@@ -35,10 +35,10 @@ from rules import combinations as C  # noqa: E402
 from rules.combinations import (SceneConfig, LayoutConfig, CardConfig, ProtectionConfig,  # noqa: E402
                                 FinishConfig, DamageConfig, SleeveConfig, validate_scene_config)
 from blender import layouts  # noqa: E402
-from blender.labeling import label_card  # noqa: E402
+from blender.labeling import label_scene  # noqa: E402
 from blender.render_setup import setup_render  # noqa: E402
 from blender import scene_common as sc  # noqa: E402
-from labeltools.yolo_pose import write_label_file, write_dataset_yaml  # noqa: E402
+from labeltools.yolo_pose import write_poly_label_file, write_dataset_yaml  # noqa: E402
 
 try:
     from texturegen.cardsource import CardLibrary
@@ -137,8 +137,7 @@ def run_scene(i, grid, page_color, content, lib, cache):
 
     bpy.context.view_layer.update()
     labels = []
-    for inst in instances:
-        lbl, _reason, _ = label_card(scene, cam, inst.card, inst.card_id, holo_tag=inst.holo_tag)
+    for _inst, lbl, _reason in label_scene(scene, cam, instances):   # occlusion-aware
         if lbl:
             labels.append(lbl)
 
@@ -146,7 +145,7 @@ def run_scene(i, grid, page_color, content, lib, cache):
     out_dir = os.path.join(_ROOT, config.OUTPUT.root)
     scene.render.filepath = os.path.join(out_dir, f"{name}.png")
     bpy.ops.render.render(write_still=True)
-    write_label_file(os.path.join(out_dir, f"{name}.txt"), labels)
+    write_poly_label_file(os.path.join(out_dir, f"{name}.txt"), labels)
     print(f"  {name}: {len(labels)}/{len(instances)} cards labeled")
 
 

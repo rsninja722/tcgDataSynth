@@ -30,6 +30,16 @@ def test_determinism():
     assert not np.array_equal(a, c)
 
 
+def test_case_cover_wear_denser_and_higher_res():
+    # Same footprint for a fair density comparison at equal resolution.
+    top = sw.generate_scratch_dust(512, 512, seed=7)
+    cover = sw.generate_case_cover_wear(512, 512, seed=7)
+    assert (cover > 20).mean() > (top > 20).mean(), "cover must be denser than toploader"
+    # Default cover is higher resolution than the toploader assets (1024).
+    big = sw.generate_case_cover_wear(seed=0)
+    assert big.shape == (2048, 2048) and big.dtype == np.uint8
+
+
 def _write_preview():
     os.makedirs(config.OUTPUT.root, exist_ok=True)
     m = sw.generate_scratch_dust(1024, 1024, seed=0)

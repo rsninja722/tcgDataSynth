@@ -29,6 +29,32 @@ cards/        (your card images live here or wherever you point us)
 out/          renders + labels from tests and production
 ```
 
+## Required libraries
+
+### Blender's bundled Python (gen-time)
+
+The generator calls these from inside Blender, so they must be installed into
+**Blender's own Python**, not your system Python. Run each in an **admin** terminal
+(replace the path if your Blender lives elsewhere):
+
+```
+"C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe" -m pip install opencv-python-headless
+"C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe" -m pip install shapely
+```
+
+| Package                 | Used for                                                        | If missing |
+|-------------------------|-----------------------------------------------------------------|------------|
+| `opencv-python-headless`| damage overlays + physical-texture normal maps at gen time      | falls back to plain textures (no damage/etched foil) |
+| `shapely`               | occlusion-aware label pass (polygon boolean for carved bounds)  | occlusion carving skipped; frustum bounds still emitted |
+
+### Docker / system Python (pure-Python unit tests)
+
+```
+pip install --break-system-packages --no-cache-dir numpy opencv-python-headless pillow shapely
+```
+
+(`rules/`, `texturegen/`, `postfx/`, `labeltools/` are unit-tested here before integration.)
+
 ## Conventions
 
 - Units: **meters**, real-world scale. Card = 0.063 × 0.088 × 0.00045 m.

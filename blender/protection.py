@@ -37,12 +37,13 @@ SLEEVE_MARGINS = {"1mm": 0.001, "2.5mm": 0.0025}
 # every instance would show the identical reflection/scratch pattern. Each instance
 # instead samples a random cropped/zoomed sub-region (+ random flips) of the shared
 # texture via a Mapping node, giving near-infinite variety from a handful of assets.
-def random_uv_xform(rng):
+def random_uv_xform(rng, win_range=(0.3, 0.6)):
     """Return a UV transform (loc_x, loc_y, win, flip_x, flip_y) that crops a random
-    `win`-sized sub-window (30-60% of the texture) placed ENTIRELY within [0,1], so
-    the sample never crosses a tile boundary -> no hard seam on non-tiling maps.
-    Mapping applies result = win*uv + loc, so a `win`<1 zooms IN to a sub-region."""
-    win = float(rng.uniform(0.3, 0.6))
+    `win`-sized sub-window placed ENTIRELY within [0,1], so the sample never crosses a
+    tile boundary -> no hard seam on non-tiling maps. Mapping applies result = win*uv +
+    loc, so a `win`<1 zooms IN (magnifies features). Use `win_range` near 1.0 for large
+    surfaces that should show the near-full texture (features stay small, not magnified)."""
+    win = float(rng.uniform(*win_range))
     flip_x = bool(rng.random() < 0.5)
     flip_y = bool(rng.random() < 0.5)
     # For a flipped axis the window runs [loc-win, loc], so loc must be in [win, 1];

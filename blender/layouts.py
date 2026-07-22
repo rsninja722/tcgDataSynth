@@ -17,6 +17,7 @@ import bmesh
 
 from blender import scene_builder as sb
 from blender import protection as prot
+from rules import combinations as C
 
 _ASSETS = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets"))
 
@@ -199,26 +200,43 @@ def _build_binder_page(pivot, pivot_x, pcx, page_w, page_h, pad, cw, ch, gap, ro
                                                            warp_strength=0.5))
 
     # Welded seams at the midpoints between slots (+ page edges) => separate slots.
-    wm = _weld_material(f"Weld_{tag}")
-    lw = 0.0015
-    z0, z1 = -0.0006, cg
-    wz, wh = (z0 + z1) / 2.0, (z1 - z0)
-    vxs = ([-page_w / 2 + pad / 2]
-           + [-page_w / 2 + pad + c * (cw + gap) + cw + gap / 2 for c in range(cols - 1)]
-           + [page_w / 2 - pad / 2])
-    for j, vx in enumerate(vxs):
-        b = _box(f"WeldV_{tag}_{j}", lw, page_h, wh)
-        b.location = (local(pcx + vx), 0.0, wz)
-        b.parent = pivot
-        b.data.materials.append(wm)
-    hys = ([page_h / 2 - pad / 2]
-           + [page_h / 2 - pad - r * (ch + gap) - ch - gap / 2 for r in range(rows - 1)]
-           + [-page_h / 2 + pad / 2])
-    for j, hy in enumerate(hys):
-        b = _box(f"WeldH_{tag}_{j}", page_w, lw, wh)
-        b.location = (local(pcx), hy, wz)
-        b.parent = pivot
-        b.data.materials.append(wm)
+    # Anti-overfitting measures (per user):
+    #  0. 50% of pages have NO dividers at all, so their presence isn't a constant.
+    #  1. Bars are inset by `pad` from the page rim so they stop at the card-grid
+    #     boundary instead of running to the very edge. This breaks the continuous
+    #     border rectangle and the +-shaped crossings at the page corners/edges,
+    #     which would otherwise be a reliable landmark for the model to latch onto.
+    #  2. ~25% of the divider lines are dropped at random so the grid of seams is
+    #     not a dependable cue (Bernoulli(0.25) per line, from the scene rng).
+    if float(rng.random()) < 0.5:         # this page keeps its slot dividers
+        wm = _weld_material(f"Weld_{tag}")
+        lw = 0.0015
+        z0, z1 = -0.0006, cg
+        wz, wh = (z0 + z1) / 2.0, (z1 - z0)
+        edge_inset = pad                      # keep bar ends off the page rim
+        v_len = max(lw, page_h - 2 * edge_inset)   # vertical bars: shortened height
+        h_len = max(lw, page_w - 2 * edge_inset)   # horizontal bars: shortened width
+        drop_p = 0.25                         # fraction of divider lines to omit
+        vxs = ([-page_w / 2 + pad / 2]
+               + [-page_w / 2 + pad + c * (cw + gap) + cw + gap / 2 for c in range(cols - 1)]
+               + [page_w / 2 - pad / 2])
+        for j, vx in enumerate(vxs):
+            if float(rng.random()) < drop_p:
+                continue
+            b = _box(f"WeldV_{tag}_{j}", lw, v_len, wh)
+            b.location = (local(pcx + vx), 0.0, wz)
+            b.parent = pivot
+            b.data.materials.append(wm)
+        hys = ([page_h / 2 - pad / 2]
+               + [page_h / 2 - pad - r * (ch + gap) - ch - gap / 2 for r in range(rows - 1)]
+               + [-page_h / 2 + pad / 2])
+        for j, hy in enumerate(hys):
+            if float(rng.random()) < drop_p:
+                continue
+            b = _box(f"WeldH_{tag}_{j}", h_len, lw, wh)
+            b.location = (local(pcx), hy, wz)
+            b.parent = pivot
+            b.data.materials.append(wm)
 
     for card_cfg, slot in zip(cards, filled):
         r, c = slot // cols, slot % cols
@@ -243,7 +261,8 @@ def build_binder(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
     10deg; the content page (welded slot grid) sits on the configured side; a reused
     table backdrop fills the background. Returns (instances, frame_extent_m)."""
     p = scene_cfg.layout.params
-    rows, cols = (int(x) for x in str(p.get("grid", "3x3")).split("x"))
+    # Grid string is WIDTH x HEIGHT: "4x3" => 4 cols wide, 3 rows tall.
+    cols, rows = (int(x) for x in str(p.get("grid", "3x3")).split("x"))
     content = _BINDER_CONTENT.get(p.get("content_type", "sleeved"), _BINDER_CONTENT["sleeved"])
     cw, ch = content["size"]
     ct, cg = content["thick"], content["gap"]
@@ -350,3 +369,131 @@ def build_floating(scene_cfg, card_lib, cache_dir: str, rng,
         inst.root.rotation_euler = (rx, ry, rz)
         instances.append(inst)
     return instances
+
+
+# --------------------------------------------------------------------------- #
+# Display case (spec §3.5.3): random-material base; a TIGHT grid of toploadered
+# or slabbed cards, all flat or all tilted forward 25deg; a scratched/smudged
+# clear cover a fixed headroom above the tallest item.
+# --------------------------------------------------------------------------- #
+_CASE_HEADROOM = 0.040   # cover sits 40mm above the top of the tallest (rotated) item
+
+
+def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
+    """Display case: cards in a tight aligned grid on a random-material base with
+    four side walls (same material) rising to a scratched/smudged 6mm acrylic cover
+    that clears the tallest item by _CASE_HEADROOM (40mm); cards all flat or all
+    tilted forward 25deg. Content is toploaders or slabs (enforced by rules). Grid
+    capped at 24 cards upstream. Returns (instances, frame_extent_m)."""
+    p = scene_cfg.layout.params
+    cards = scene_cfg.cards
+    n = len(cards)
+    cols = max(1, int(p.get("cols", 4)))
+    rows = max(1, (n + cols - 1) // cols)   # effective rows (robust if cards trimmed)
+    tilt = math.radians(float(p.get("tilt_deg", 0.0))) if p.get("tilt_forward") else 0.0
+
+    # Tight aligned grid: every card shares orientation (no random spin), so pack by
+    # the actual footprint. Forward tilt shrinks the projected y-footprint by cos(tilt).
+    foot = [sb.protection_footprint(c.protection) for c in cards]
+    fw = max((w for w, _ in foot), default=0.075)
+    fh = max((h for _, h in foot), default=0.10)
+    gap = 0.004
+    sx = fw + gap
+    sy = fh * math.cos(tilt) + gap
+    grid_w, grid_h = cols * sx, rows * sy
+
+    case_w, case_h = grid_w + 0.05, grid_h + 0.05
+
+    # Random-material base under the cards (spec: random color/material base). The
+    # four side walls reuse the SAME material and connect the base up to the cover.
+    if rng.random() < 0.5:
+        case_mat = _solid_material("CaseBaseMat", rng, roughness=0.5)
+    else:
+        case_mat = _noisy_material("CaseBaseMat", rng)
+    base = _plane("CaseBase", case_w, case_h, z=0.0)
+    base.data.materials.append(case_mat)
+
+    eps = 0.0003
+    instances = []
+    top_z = 0.0                                    # tallest item's top after rotation
+    for i, ccfg in enumerate(cards):
+        gx, gy = i % cols, i // cols
+        cx = (gx - (cols - 1) / 2.0) * sx
+        cy = ((rows - 1) / 2.0 - gy) * sy         # fill the top row first
+        fh_i = sb.protection_footprint(ccfg.protection)[1]
+        ht_i = sb.protection_half_thickness(ccfg.protection)
+        inst = sb.build_card_instance(f"Card{i}", ccfg, card_lib.select(rng), cache_dir, rng)
+        # Stand the card UP by hinging about its BOTTOM (-Y, art-bottom) edge, which
+        # rests on the base: the bottom edge stays planted while the top (+Y, art-top)
+        # edge lifts toward the camera. This keeps the art right-side-up and stops the
+        # top edge from rotating DOWN through the base (the old center-pivot -tilt bug).
+        # Hinge rotation = center rotation (rx=+tilt) + compensating translation so the
+        # hinge point maps to itself. Center is at +fh/2 (Y) and +ht (Z) from the hinge.
+        rx = tilt
+        half = (fh_i / 2.0) * math.sin(tilt) + ht_i * math.cos(tilt)
+        loc_y = cy - (fh_i / 2.0) * (1.0 - math.cos(tilt)) - ht_i * math.sin(tilt)
+        loc_z = half + eps
+        if ccfg.back_to_camera:                   # display_case never sets this
+            rx += math.pi
+        inst.root.location = (cx, loc_y, loc_z)
+        inst.root.rotation_euler = (rx, 0.0, 0.0)
+        instances.append(inst)
+        top_z = max(top_z, loc_z + half)          # top-front corner world z
+
+    # Case interior height = tallest item's top + headroom. Side walls (same material
+    # as the base) rise from z=0 to that height; the cover rests on them. Walls are
+    # inset so their outer faces sit flush with the base edge.
+    case_height = top_z + _CASE_HEADROOM
+    wall_t = 0.004
+    for nm, sxw, syw, wx, wy in (
+        ("CaseWallL", wall_t, case_h, -(case_w / 2 - wall_t / 2), 0.0),
+        ("CaseWallR", wall_t, case_h,  (case_w / 2 - wall_t / 2), 0.0),
+        ("CaseWallF", case_w, wall_t, 0.0, -(case_h / 2 - wall_t / 2)),
+        ("CaseWallB", case_w, wall_t, 0.0,  (case_h / 2 - wall_t / 2)),
+    ):
+        wall = _box(nm, sxw, syw, case_height)
+        wall.location = (wx, wy, case_height / 2.0)
+        wall.data.materials.append(case_mat)
+
+    # Scratched/smudged cover: a REAL 6mm-thick acrylic box (not a plane) resting on
+    # the walls. Uses make_slab_surface (real transmission + front/back faces, so a flat
+    # parallel lid refracts cleanly), tinted ever so slightly. It reads as CLEAR glass:
+    # low base roughness (small wear span) so you see through it, with only the fine
+    # scratch map catching light. UV maps the near-FULL 2048 wear texture (win~1.0) so
+    # the hairline scratches stay small and numerous on the large lid, not magnified.
+    cover_t = 0.006
+    warp = os.path.join(_ASSETS, f"plastic_warp_{int(rng.integers(0, 6))}.png")
+    wear = os.path.join(_ASSETS, f"case_cover_wear_{int(rng.integers(0, 6))}.png")
+    tint = (float(rng.uniform(0.86, 0.93)), float(rng.uniform(0.90, 0.96)),
+            float(rng.uniform(0.94, 0.99)))          # faint cool tint, not perfectly clear
+    cover = _box("CaseCover", case_w, case_h, cover_t)
+    cover_top = case_height + cover_t
+    cover.location = (0.0, 0.0, case_height + cover_t / 2.0)
+    cover.data.materials.append(prot.make_slab_surface(
+        "CaseCoverMat", warp, wear, base_rough=0.02, wear_rough=0.18, tint=tint,
+        uv_xform=prot.random_uv_xform(rng, win_range=(0.9, 1.0)),
+        wear_uv_xform=prot.random_uv_xform(rng, win_range=(0.9, 1.0))))
+
+    # 20% chance: a stray card lying flat ON TOP of the case lid (any of bare/sleeved/
+    # toploadered/slabbed, per rules.sample_top_card). Its CENTER can be anywhere within
+    # the top face of the case — the four cover corners (±case_w/2, ±case_h/2) are the
+    # limits — so it may hang partly off an edge but is always on the display. It rests
+    # flat on the lid (no tilt/lift, so it never floats) with a random in-plane spin.
+    if float(rng.random()) < 0.20:
+        top_cfg = C.sample_top_card(rng)
+        ht_t = sb.protection_half_thickness(top_cfg.protection)
+        inst = sb.build_card_instance("TopCard", top_cfg, card_lib.select(rng), cache_dir, rng)
+        inst.root.location = (float(rng.uniform(-case_w / 2.0, case_w / 2.0)),
+                              float(rng.uniform(-case_h / 2.0, case_h / 2.0)),
+                              cover_top + ht_t + eps)
+        inst.root.rotation_euler = (0.0, 0.0, float(rng.uniform(0.0, 2.0 * math.pi)))
+        instances.append(inst)
+
+    # Table the whole case sits on (reused from the binder scene): a large noisy plane
+    # just BELOW the case base so the background isn't a void. Built LAST so its rng
+    # draw doesn't shift the earlier base/grid/cover/top-card randomness.
+    table = _plane("CaseTable", 3.0, 3.0, z=-0.003)
+    table.data.materials.append(_noisy_material("CaseTableMat", rng))
+
+    extent = max(grid_w, grid_h) + 0.05
+    return instances, extent

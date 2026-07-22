@@ -50,9 +50,15 @@ HOLO_TAGS = ("none", "full", "holo", "reverse")
 
 @dataclass(frozen=True)
 class CardLabel:
-    """One card instance's label data (already normalized, top-left origin)."""
+    """One card instance's label data (already normalized, top-left origin).
+
+    `corners` holds the keypoints in order: exactly 4 (TL,TR,BR,BL) for a full
+    'card' (class 0), or 3-5 points for a 'partial_card' (class 1) — its in-frustum
+    corners plus the 2 frustum-boundary crossing points. bbox is the min/max
+    envelope of whatever points are present.
+    """
     card_id: str
-    corners: Tuple[Corner, Corner, Corner, Corner]  # in KEYPOINT_ORDER
+    corners: Tuple[Corner, ...]                      # 4 for card, 3-5 for partial_card
     holo_tag: str = "none"                           # none | full | holo | reverse
     class_id: int = config.YOLO_CLASS_ID
     visibility: int = config.KPT_VISIBILITY
@@ -105,6 +111,85 @@ def parse_pose_line(line: str) -> ParsedLabel:
     return ParsedLabel(class_id, (cx, cy, w, h), corners, vis, card_id, holo_tag)
 
 
+# --------------------------------------------------------------------------- #
+# Occlusion-aware CUSTOM format (spec: 2026-07-22 user).
+#
+#   <class> <rb1x> <rb1y> <rb2x> <rb2y>  <x1> <y1> <f1> ... <xn> <yn> <fn>  |<id>|<holo>
+#
+# - <class>: 0 'card' | 1 'partial_card'.
+# - (rb1x,rb1y),(rb2x,rb2y): the two opposite corners (min, max) of the axis-aligned
+#   bounding rectangle of the bound points (replaces YOLO's cx,cy,w,h).
+# - each bound point is (x, y, flag); flag 1=TL 2=TR 3=BL 4=BR original corner,
+#   5=a non-corner bound point (frustum crossing / covered frame corner / occlusion
+#   vertex). Points are in clockwise perimeter order; missing corners are simply absent.
+#   The polygon may be CONCAVE (occlusion carving).
+# --------------------------------------------------------------------------- #
+TaggedPoint = Tuple[float, float, int]  # (x, y, flag)
+
+
+@dataclass(frozen=True)
+class PolyLabel:
+    """One card's occlusion-aware bound in the custom format above."""
+    card_id: str
+    points: Tuple[TaggedPoint, ...]     # (x, y, flag) in clockwise perimeter order
+    holo_tag: str = "none"
+    class_id: int = config.YOLO_CLASS_ID
+
+    def bbox2(self) -> Tuple[Corner, Corner]:
+        xs = [p[0] for p in self.points]
+        ys = [p[1] for p in self.points]
+        return (min(xs), min(ys)), (max(xs), max(ys))
+
+    def to_line(self, include_id: bool = True) -> str:
+        (x0, y0), (x1, y1) = self.bbox2()
+        parts: List[str] = [str(self.class_id), _fmt(x0), _fmt(y0), _fmt(x1), _fmt(y1)]
+        for (x, y, f) in self.points:
+            parts.extend([_fmt(x), _fmt(y), str(int(f))])
+        line = " ".join(parts)
+        if include_id:
+            line += f" |{self.card_id}|{self.holo_tag}"
+        return line
+
+
+@dataclass(frozen=True)
+class ParsedPoly:
+    class_id: int
+    bbox2: Tuple[Corner, Corner]          # (min_xy, max_xy)
+    points: List[TaggedPoint]             # (x, y, flag)
+    card_id: str
+    holo_tag: str = ""
+
+
+def parse_poly_line(line: str) -> ParsedPoly:
+    """Parse one custom-format line (tolerating the optional ` |<id>|<holo>`)."""
+    line = line.strip()
+    card_id = holo_tag = ""
+    if "|" in line:
+        segs = line.split("|")
+        line = segs[0]
+        if len(segs) >= 2:
+            card_id = segs[1].strip()
+        if len(segs) >= 3:
+            holo_tag = segs[2].strip()
+    toks = line.split()
+    class_id = int(float(toks[0]))
+    x0, y0, x1, y1 = (float(t) for t in toks[1:5])
+    pt_toks = toks[5:]
+    points: List[TaggedPoint] = []
+    for i in range(0, len(pt_toks) - 2, 3):
+        points.append((float(pt_toks[i]), float(pt_toks[i + 1]), int(float(pt_toks[i + 2]))))
+    return ParsedPoly(class_id, ((x0, y0), (x1, y1)), points, card_id, holo_tag)
+
+
+def write_poly_label_file(path: str, labels: Sequence[PolyLabel], include_id: bool = True) -> None:
+    """Write one custom-format line per PolyLabel (empty list => empty file, still
+    written so every image keeps a label pair)."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        for lab in labels:
+            fh.write(lab.to_line(include_id=include_id) + "\n")
+
+
 def write_label_file(path: str, labels: Sequence[CardLabel], include_id: bool = True) -> None:
     """Write one line per label. Empty list => empty file (still written, so a
     rendered image always has its label pair, even when 0 cards are labeled)."""
@@ -118,13 +203,16 @@ def write_dataset_yaml(
     path: str,
     train: str = "images",
     val: str = "images",
-    class_names: Sequence[str] = ("card",),
+    class_names: Sequence[str] = config.CLASS_NAMES,
 ) -> None:
     """Write an Ultralytics dataset.yaml with kpt_shape [4, 3] (spec §3.9).
 
     Written by hand (no PyYAML dependency) to keep this module dependency-free.
+    kpt_shape describes the full 'card' class (4 corners); a 'partial_card' carries
+    a variable 3-5 keypoints (see config.PARTIAL_KPT_RANGE) — noted here for humans.
     """
     kx, ky = config.KPT_SHAPE
+    pmin, pmax = config.PARTIAL_KPT_RANGE
     names = "\n".join(f"  {i}: {n}" for i, n in enumerate(class_names))
     content = (
         f"# Auto-generated by labeltools/yolo_pose.py\n"
@@ -132,7 +220,10 @@ def write_dataset_yaml(
         f"train: {train}\n"
         f"val: {val}\n"
         f"kpt_shape: [{kx}, {ky}]\n"
-        f"# keypoint order: {', '.join(config.KEYPOINT_ORDER)} (card's own upright frame)\n"
+        f"# keypoint order (class 0 'card'): {', '.join(config.KEYPOINT_ORDER)} "
+        f"(card's own upright frame)\n"
+        f"# class 1 'partial_card' carries {pmin}-{pmax} keypoints: in-frustum corners "
+        f"+ 2 frustum-edge crossing points\n"
         f"names:\n{names}\n"
     )
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)

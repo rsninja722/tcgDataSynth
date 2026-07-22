@@ -90,11 +90,20 @@ VIEW_TRANSFORM = "AgX"
 # --------------------------------------------------------------------------- #
 # Label format (spec §3.9)
 # --------------------------------------------------------------------------- #
-YOLO_CLASS_ID = 0
+YOLO_CLASS_ID = 0        # 'card': fully in-frustum, exactly 4 corner keypoints
+PARTIAL_CLASS_ID = 1     # 'partial_card': partially in-frustum, 3-5 keypoints
+CLASS_NAMES = ("card", "partial_card")
 # Keypoint order in the card's own upright frame (user decision 2026-07-19).
 KEYPOINT_ORDER = ("TL", "TR", "BR", "BL")
-KPT_SHAPE = (4, 3)  # 4 keypoints, (x, y, visibility)
-KPT_VISIBILITY = 2  # all corners flagged visible per spec
+KPT_SHAPE = (4, 3)  # 4 keypoints, (x, y, visibility) for a full 'card'
+# A 'partial_card' carries a VARIABLE number of keypoints: the exact outline of the
+# card's VISIBLE region = the polygon (card quad) ∩ (frustum square). That polygon's
+# vertices are the in-frustum card corners, the points where card edges cross the
+# frustum boundary, AND any frustum CORNER the card covers (an interior-of-card point
+# that sits on the frame corner). A quad ∩ square gives up to 8 vertices; boundary
+# vertices always have a normalized component == 0 or 1.
+PARTIAL_KPT_RANGE = (3, 8)
+KPT_VISIBILITY = 2  # all kept keypoints flagged visible per spec
 
 
 @dataclass(frozen=True)
@@ -140,6 +149,7 @@ DEFAULT_CONFIG = {
         "floating": {"max_cards": 12, "max_shapes": 12, "allow_overlap": False,
                      "out_of_frustum": "keep"},
         "binder": {"max_cards": 12, "out_of_frustum": "keep"},
+        "display_case": {"max_cards": 24, "out_of_frustum": "keep"},
     },
 }
 # Back-compat alias (used by tests / older references).

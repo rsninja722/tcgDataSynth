@@ -172,6 +172,20 @@ def test_display_case_only_toploader_or_slab():
         assert kinds <= {"toploader", "slab"}, kinds
 
 
+def test_display_case_capped_at_24_cards():
+    seen_max = 0
+    for seed in range(300):
+        cfg = _sample(seed, layouts=["display_case"])
+        n = len(cfg.cards)
+        assert n <= C.DISPLAY_CASE_MAX_CARDS, f"seed {seed}: {n} cards"
+        # grid params stay consistent with the (possibly capped) card count.
+        cols = cfg.layout.params["cols"]
+        rows = cfg.layout.params["rows"]
+        assert n <= cols * rows and n > cols * (rows - 1), (n, cols, rows)
+        seen_max = max(seen_max, n)
+    assert seen_max == C.DISPLAY_CASE_MAX_CARDS, f"cap never reached (max {seen_max})"
+
+
 def test_binder_cards_match_content_type():
     for seed in range(150):
         cfg = _sample(seed, layouts=["binder"])
