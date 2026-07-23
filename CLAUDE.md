@@ -11,9 +11,37 @@ Blender 5.0 synthetic-data generator for a trading-card **corner-detection** mod
 Blender**; all `bpy` code is delivered as numbered `tests/tXX_*.py` scripts the USER
 runs in Blender 5.0 and reports back. Pure-Python modules are unit-tested in Docker.
 
+## SESSION HANDOFF (2026-07-22) — read first
+
+**Immediate next step:** user re-runs `tests/t12_display_case.py` in Blender 5.0 to verify
+the latest display-case + labeling changes (all still `bpy`-UNVERIFIED — compile-only here).
+
+**BIG UNVERIFIED SUBSYSTEM — occlusion-aware labeling (this session, all layouts):**
+- Output format CHANGED program-wide from YOLO-pose to the CUSTOM poly format (see
+  Conventions/labels): `<class> <rb1x rb1y rb2x rb2y> (x y flag)* |id|holo`. Concave bounds.
+- `blender.labeling.label_scene(scene,cam,instances)` = new two-pass entry point (frustum
+  clip → occlusion carving). ALL layout tests (t08/t09/t11/t12) now call it +
+  `write_poly_label_file` (replaced per-inst `label_card`+`write_label_file`).
+- **REQUIRES shapely in Blender's bundled Python** (README "Required libraries" has the
+  install cmd). WITHOUT it, occlusion carving is silently SKIPPED (frustum bounds still
+  emit) — so if the user reports "no occlusion", first check shapely is installed in BLENDER.
+- Visualizer CLI (`python3 labeltools/visualize.py img txt`) now renders the CUSTOM format.
+- Pure-python core is SOLID: 84 Docker unit tests green incl. test_occlusion (9) +
+  test_frustum (11, Sutherland-Hodgman clip) + poly format round-trips. The RISK is entirely
+  the un-run `bpy` glue: occluder_quads_world geometry, depths, label_scene wiring.
+- What to look for in t12 renders: cards behind a nearer card/top-card get their bound CARVED
+  (concave, magenta flag-5 points, orange partial box); coplanar grid cards must NOT carve
+  each other; the on-lid top card sits flat within the case; a table fills the bg below.
+
+**Nothing else in Phase 4 has been user-verified since binder (t11).** t12 (display case)
+in ALL its versions is awaiting the user's first good run. After t12 passes → HAND layout,
+then Phases 5-8. See Phase-status → Phase 4 for the full t12 v1..v4 change log.
+
 ## blender install location
 
 - "C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" use this when providing commands or in scripts as needed
+- Blender's bundled Python (for pip installs): `"C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe"`.
+  Installed there by user: opencv-python-headless (cv2). MUST ALSO install: **shapely** (occlusion).
 
 ## Locked decisions (from user, 2026-07-19)
 - **Orchestration:** modal-timer operator (one scene per timer tick; Blender + assets
