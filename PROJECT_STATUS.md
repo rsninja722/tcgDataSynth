@@ -1,6 +1,6 @@
 # Project Status
 
-Last consolidated: 2026-07-25.
+Last consolidated: 2026-07-26.
 
 ## Active Checkpoint
 
@@ -13,6 +13,8 @@ Acceptance focus:
 - Cards with more than 80% of their in-frustum area occluded are not labeled.
 - Created polygon vertices are magenta in the visualizer.
 - Full and partial frustum bounds align with the rendered cards.
+- Grid bounds follow the apparent card corners after lid/slab refraction; the card on
+  top of the lid remains directly projected unless it is itself slabbed.
 - Every t12 scene has a top card resting flat on the acrylic lid.
 - The table backdrop fills the area below the case.
 
@@ -45,6 +47,8 @@ Do not start the hand layout until this checkpoint is reviewed with the user.
 - Canonical card-corner order: TL, TR, BR, BL.
 - A back-facing card is not labeled.
 - Damage variation is per instance, not cached solely by card ID.
+- Bulk acrylic label projection uses finite oriented boxes, nominal IOR 1.5, and the
+  geometric-normal Snell ray as the apparent scattering centroid.
 
 ## Active Label Contract
 
@@ -55,6 +59,11 @@ This is a project blocker before Phase 8: the custom format cannot be passed dir
 ## Known Risks
 
 - The bpy portion of occlusion-aware labeling has not yet been executed by the user.
+- The refractive label projection has pure-Python coverage but has not yet been
+  compared visually against Blender Cycles; t12 is the active acceptance path.
+- Refraction intentionally ignores surface roughness, scratches, smudges, and normal
+  maps. Intersecting/touching refractive boxes fail explicitly rather than using an
+  incorrect nested-medium approximation.
 - Occlusion currently approximates each embedded card with a projected rectangle and mean depth. Intersecting or strongly tilted geometry may need a depth-aware method before the hand layout.
 - The single-ring custom format keeps one connected polygon and bridges holes; disconnected visible regions are not represented exactly.
 - The prebuilt protection-library loader exists but the integrated scene builder still constructs protection geometry per instance. Address sharing before throughput work or earlier if display-case memory is excessive.

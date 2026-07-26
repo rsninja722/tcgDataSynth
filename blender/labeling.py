@@ -3,9 +3,9 @@ Card corner labeling in Blender (bpy REQUIRED). Promoted from the Phase-1 test
 script after the labeling math was validated against real renders.
 
 Projects a card's four ideal (un-rounded, sharp) corner points with
-world_to_camera_view and defers the label/skip DECISION to the Docker-tested
-labeltools.frustum.classify. This is the single labeling path used by every
-layout from Phase 4 on.
+an idealized refractive ray where marked bulk acrylic is present, then defers the
+label/skip decision to bpy-free labeltools geometry. This is the single labeling
+path used by every layout from Phase 4 on.
 """
 from __future__ import annotations
 
@@ -19,6 +19,9 @@ import config
 from labeltools.frustum import classify, is_front_visible
 from labeltools.yolo_pose import CardLabel, PolyLabel
 from labeltools.occlusion import compute_bound, require_shapely
+from labeltools.refraction import (BOUNDS_MAX_PROPERTY, BOUNDS_MIN_PROPERTY,
+                                   IOR_PROPERTY, RefractiveBox, RefractionError,
+                                   solve_camera_ray)
 
 
 def ideal_corners_local(
@@ -60,42 +63,74 @@ def label_card(
     front_visible = is_front_visible(
         front_normal_world(obj), cam.matrix_world.translation, mw.translation
     )
+    boxes = _refractive_boxes(scene)
+    linear = mw.to_3x3()
+    card_x = (linear @ Vector((1.0, 0.0, 0.0))).normalized()
+    card_y = (linear @ Vector((0.0, 1.0, 0.0))).normalized()
     ndc_corners: List[Tuple[float, float, float]] = []
     debug_rows = []
     for i, local in enumerate(corners_local):
-        v = world_to_camera_view(scene, cam, mw @ local)
-        ndc_corners.append((v.x, v.y, v.z))
-        in_f = (0.0 <= v.x <= 1.0) and (0.0 <= v.y <= 1.0) and (v.z > 1e-6)
-        debug_rows.append((i + 1, v.x, v.y, v.z, in_f))
+        x, y, z = _project_apparent_corner(scene, cam, mw @ local, card_x, card_y,
+                                            boxes, card_id)
+        ndc_corners.append((x, y, z))
+        in_f = (0.0 <= x <= 1.0) and (0.0 <= y <= 1.0) and (z > 1e-6)
+        debug_rows.append((i + 1, x, y, z, in_f))
     label, reason = classify(card_id, ndc_corners, front_visible, holo_tag=holo_tag)
     return label, reason, debug_rows
 
 
 # --------------------------------------------------------------------------- #
-# Occlusion second pass (spec: 2026-07-22 user). Each card is also an OCCLUDER:
-# its transformed card rectangle hides parts of cards behind it. label_scene runs the
-# frustum pass then carves each card's bound where a nearer rectangle covers >25%.
+# Apparent projection + occlusion second pass. Each marked refractive object is
+# approximated as a finite homogeneous box. Every card polygon is projected once and
+# reused as its opaque occluder so carving and labels share the same optical model.
 # --------------------------------------------------------------------------- #
-def occluder_quads_world(inst):
-    """World-space card rectangle used to occlude cards behind this instance.
-
-    The embedded card transform carries the offset and rotation inside a toploader or
-    slab. Clear protection is not treated as an opaque outer rectangle.
-    """
-    mw = inst.card.matrix_world
-    return [[mw @ corner for corner in ideal_corners_local()]]
-
-
-def _project_quads(scene, cam, quads):
-    """Project each world quad to (quad_2d, mean_depth); drop quads with any corner
-    behind the camera (their 2D projection is unreliable)."""
-    out = []
-    for qw in quads:
-        proj = [world_to_camera_view(scene, cam, p) for p in qw]
-        if any(pv.z <= 1e-6 for pv in proj):
+def _refractive_boxes(scene):
+    boxes = []
+    for obj in scene.objects:
+        if IOR_PROPERTY not in obj:
             continue
-        out.append(([(pv.x, pv.y) for pv in proj], sum(pv.z for pv in proj) / len(proj)))
-    return out
+        if BOUNDS_MIN_PROPERTY not in obj or BOUNDS_MAX_PROPERTY not in obj:
+            raise RuntimeError(f"Refractor {obj.name!r} has no local optical bounds")
+        bmin = Vector(tuple(float(v) for v in obj[BOUNDS_MIN_PROPERTY]))
+        bmax = Vector(tuple(float(v) for v in obj[BOUNDS_MAX_PROPERTY]))
+        center_local = (bmin + bmax) * 0.5
+        half_local = (bmax - bmin) * 0.5
+        matrix = obj.matrix_world
+        linear = matrix.to_3x3()
+        center = matrix @ center_local
+        half_vectors = [linear @ Vector((half_local.x, 0.0, 0.0)),
+                        linear @ Vector((0.0, half_local.y, 0.0)),
+                        linear @ Vector((0.0, 0.0, half_local.z))]
+        half_sizes = [vec.length for vec in half_vectors]
+        if min(half_sizes) <= 1e-9:
+            raise RuntimeError(f"Refractor {obj.name!r} has a degenerate world transform")
+        boxes.append(RefractiveBox(
+            center=tuple(center),
+            axes=[tuple(vec.normalized()) for vec in half_vectors],
+            half_sizes=half_sizes,
+            ior=float(obj[IOR_PROPERTY]),
+            name=obj.name,
+        ))
+    return boxes
+
+
+def _project_apparent_corner(scene, cam, world_corner, card_x, card_y, boxes, card_name):
+    direct = world_to_camera_view(scene, cam, world_corner)
+    if direct.z <= 1e-6 or not boxes:
+        return direct.x, direct.y, direct.z
+    camera_pos = cam.matrix_world.translation
+    try:
+        ray = solve_camera_ray(tuple(camera_pos), tuple(world_corner),
+                               tuple(card_x), tuple(card_y), boxes)
+    except RefractionError as exc:
+        raise RuntimeError(
+            f"Could not project refracted corner for {card_name!r}: {exc}"
+        ) from exc
+    # Perspective image coordinates depend on ray direction, not the distance of this
+    # helper point. Keep the direct target depth for physical near/far ordering.
+    along_ray = camera_pos + Vector(tuple(float(v) for v in ray))
+    apparent = world_to_camera_view(scene, cam, along_ray)
+    return apparent.x, apparent.y, direct.z
 
 
 def label_scene(scene, cam, instances, area_frac: float = 0.25):
@@ -106,19 +141,23 @@ def label_scene(scene, cam, instances, area_frac: float = 0.25):
     of its current bound. Shapely is mandatory; missing it is a setup error.
     """
     require_shapely()
+    boxes = _refractive_boxes(scene)
     projected = []   # per instance: (ndc_corners, front_visible, card_depth)
     occ_quads = []   # per instance: list[(quad_2d, depth)]
     for inst in instances:
         mw = inst.card.matrix_world
-        ndc = []
-        for lc in ideal_corners_local():
-            v = world_to_camera_view(scene, cam, mw @ lc)
-            ndc.append((v.x, v.y, v.z))
+        linear = mw.to_3x3()
+        card_x = (linear @ Vector((1.0, 0.0, 0.0))).normalized()
+        card_y = (linear @ Vector((0.0, 1.0, 0.0))).normalized()
+        ndc = [_project_apparent_corner(scene, cam, mw @ lc, card_x, card_y,
+                                        boxes, inst.card_id)
+               for lc in ideal_corners_local()]
         fv = is_front_visible(front_normal_world(inst.card),
                               cam.matrix_world.translation, mw.translation)
         depth = sum(z for (_x, _y, z) in ndc) / 4.0
         projected.append((ndc, fv, depth))
-        occ_quads.append(_project_quads(scene, cam, occluder_quads_world(inst)))
+        occ_quads.append([] if any(z <= 1e-6 for _x, _y, z in ndc)
+                         else [([(x, y) for x, y, _z in ndc], depth)])
 
     results = []
     for i, inst in enumerate(instances):

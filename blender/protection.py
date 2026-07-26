@@ -24,6 +24,8 @@ import bpy
 import bmesh
 
 import config
+from labeltools.refraction import (BOUNDS_MAX_PROPERTY, BOUNDS_MIN_PROPERTY,
+                                   IOR_PROPERTY)
 
 _OFF = 0.00012          # layer standoff from the card surface (0.12mm; spec says 0.05mm
                         # but that razor gap z-fights the card at grazing angles).
@@ -714,6 +716,11 @@ def build_slab(name: str, warp_map_path: Optional[str], wear_map_path: Optional[
     rule). Returns obj at origin."""
     mesh = _slab_mesh(name)
     obj = bpy.data.objects.new(name, mesh)
+    # Label projection treats the main slab envelope as homogeneous acrylic. The
+    # geometric-normal ray intentionally ignores its small ridges and surface wear.
+    obj[IOR_PROPERTY] = 1.5
+    obj[BOUNDS_MIN_PROPERTY] = (-SLAB_W / 2.0, -SLAB_H / 2.0, -SLAB_T / 2.0)
+    obj[BOUNDS_MAX_PROPERTY] = (+SLAB_W / 2.0, +SLAB_H / 2.0, +SLAB_T / 2.0)
     if link:
         bpy.context.collection.objects.link(obj)
     _assign_materials(obj, [

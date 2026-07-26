@@ -17,6 +17,8 @@ import bmesh
 
 from blender import scene_builder as sb
 from blender import protection as prot
+from labeltools.refraction import (BOUNDS_MAX_PROPERTY, BOUNDS_MIN_PROPERTY,
+                                   IOR_PROPERTY)
 from rules import combinations as C
 
 _ASSETS = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets"))
@@ -467,6 +469,10 @@ def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
     tint = (float(rng.uniform(0.86, 0.93)), float(rng.uniform(0.90, 0.96)),
             float(rng.uniform(0.94, 0.99)))          # faint cool tint, not perfectly clear
     cover = _box("CaseCover", case_w, case_h, cover_t)
+    # _box uses a unit cube with object scale carrying the requested dimensions.
+    cover[IOR_PROPERTY] = 1.5
+    cover[BOUNDS_MIN_PROPERTY] = (-0.5, -0.5, -0.5)
+    cover[BOUNDS_MAX_PROPERTY] = (+0.5, +0.5, +0.5)
     cover_top = case_height + cover_t
     cover.location = (0.0, 0.0, case_height + cover_t / 2.0)
     cover.data.materials.append(prot.make_slab_surface(

@@ -23,7 +23,8 @@ boxes whose 2 crossing keypoints sit exactly on the frame edge; the shoved card 
 labeled; label corners and occlusion cuts align with the cards inside their protection;
 cards over 80% occluded have no label; the 5x5 scene has 24 grid cards; every scene
 shows a card resting on the lid. Compare near-edge cards with center cards: direct
-corner labels should remain aligned because clear slab and lid surfaces do not refract.
+labels are expected only for cards above the lid; grid labels should follow the
+apparent corners after lid refraction, with an additional slab correction where used.
 """
 import os
 import sys
@@ -188,7 +189,8 @@ def main():
     print("\n[t12] done. Scene 0 at 3 zooms (out/full/in), scenes 1-3 full. "
           "Every scene must have a card on the lid. Visualize each; scene 0's shoved "
           "card must be unlabeled; the zoomed-in view should show orange "
-          "'partial_card' boxes with on-edge keypoints.")
+          "'partial_card' boxes with on-edge keypoints. Grid labels should follow "
+          "the refracted card image; lid-card labels should remain direct.")
 
 
 if __name__ == "__main__":

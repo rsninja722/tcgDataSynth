@@ -10,6 +10,13 @@ Current Phase 4 layout scripts emit one line per card:
 
 Coordinates are normalized to `[0, 1]` with a top-left origin. Polygon points are perimeter-ordered and may be concave.
 
+Ideal card corners are optically projected before frustum clipping and occlusion. Bulk
+acrylic marked by the scene builder (currently slabs and display-case lids) uses a
+finite-box Snell-ray approximation at nominal IOR 1.5. The geometric-normal ray
+approximates the centroid of rough/scratched transmission; small normal-map, scratch,
+and smudge deviations are intentionally ignored. The same apparent polygon is used
+when a card acts as an occluder.
+
 Classes:
 
 - `0`: the card's four ideal corners are in the camera frustum.
@@ -34,6 +41,7 @@ The bounding values are min/max corners, not YOLO `cx cy w h`. Flags are semanti
 Implementation:
 
 - Geometry: `labeltools/occlusion.py`
+- Refraction math: `labeltools/refraction.py`
 - Serialization: `labeltools/yolo_pose.py::PolyLabel`
 - Blender integration: `blender/labeling.py::label_scene`
 - Visualization: `labeltools/visualize.py`
