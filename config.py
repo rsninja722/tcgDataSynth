@@ -91,7 +91,7 @@ VIEW_TRANSFORM = "AgX"
 # Label format (spec §3.9)
 # --------------------------------------------------------------------------- #
 YOLO_CLASS_ID = 0        # 'card': fully in-frustum, exactly 4 corner keypoints
-PARTIAL_CLASS_ID = 1     # 'partial_card': partially in-frustum, 3-5 keypoints
+PARTIAL_CLASS_ID = 1     # 'partial_card': partially in-frustum, 3-8 boundary points
 CLASS_NAMES = ("card", "partial_card")
 # Keypoint order in the card's own upright frame (user decision 2026-07-19).
 KEYPOINT_ORDER = ("TL", "TR", "BR", "BL")

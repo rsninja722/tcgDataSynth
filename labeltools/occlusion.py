@@ -22,22 +22,22 @@ simply do not appear. Points are emitted in clockwise perimeter order starting a
 lowest-ranked present corner (TL, then TR, BR, BL), with flag-5 points slotted in where
 they fall on the perimeter.
 
-Geometry uses shapely when available (robust concave/holed boolean ops). Without shapely
-the frustum clip still runs (via labeltools.frustum) but occlusion carving is skipped —
-so gen-time needs shapely in Blender's Python (like cv2), else labels omit occlusion.
+Geometry requires shapely for robust concave/holed boolean operations. Generation must
+fail rather than silently emit labels without the requested occlusion pass.
 """
 from __future__ import annotations
 
 from typing import List, Optional, Sequence, Tuple
 
-from labeltools.frustum import corner_in_frustum, ndc_to_yolo, _clip_to_unit_square
+from labeltools.frustum import corner_in_frustum, ndc_to_yolo
 
 try:
     from shapely.geometry import Polygon
-    from shapely.ops import unary_union  # noqa: F401  (kept for future union needs)
     _HAVE_SHAPELY = True
-except Exception:  # noqa: BLE001  (shapely optional at gen time)
+    _SHAPELY_IMPORT_ERROR = None
+except Exception as exc:  # noqa: BLE001
     _HAVE_SHAPELY = False
+    _SHAPELY_IMPORT_ERROR = exc
 
 Ndc = Tuple[float, float, float]
 Pt = Tuple[float, float]
@@ -51,9 +51,13 @@ _PERIM_RANK = {0: 0, 1: 1, 2: 2, 3: 3}
 _MATCH_TOL = 1e-6
 
 
-def _visible_ring_no_shapely(ndc_corners: Sequence[Ndc]) -> List[Pt]:
-    """Fallback (no shapely): frustum-clipped visible outline, occlusion skipped."""
-    return _clip_to_unit_square([(x, y) for (x, y, _z) in ndc_corners])
+def require_shapely() -> None:
+    """Raise a clear setup error before occlusion-aware generation starts."""
+    if not _HAVE_SHAPELY:
+        raise RuntimeError(
+            "Shapely is required for occlusion-aware labels. Install it into the "
+            "active Python environment."
+        ) from _SHAPELY_IMPORT_ERROR
 
 
 def _signed_area(pts: Sequence[Pt]) -> float:
@@ -188,15 +192,13 @@ def compute_bound(
     inside = [corner_in_frustum(x, y, z) for (x, y, z) in ndc_corners]
     n_in = sum(inside)
     class_id = 0 if n_in == len(ndc_corners) else 1
-    if n_in == 0 and any(z <= 1e-6 for (_x, _y, z) in ndc_corners):
+    if any(z <= 1e-6 for (_x, _y, z) in ndc_corners):
         return None, class_id, "fully-out-of-frustum"
 
-    if _HAVE_SHAPELY:
-        card_2d = [(x, y) for (x, y, _z) in ndc_corners]
-        cd = card_depth if card_depth is not None else float("inf")
-        ring = _occlude_shapely(card_2d, occluders, cd, area_frac)
-    else:
-        ring = _visible_ring_no_shapely(ndc_corners)   # occlusion skipped
+    require_shapely()
+    card_2d = [(x, y) for (x, y, _z) in ndc_corners]
+    cd = card_depth if card_depth is not None else float("inf")
+    ring = _occlude_shapely(card_2d, occluders, cd, area_frac)
 
     if not ring or len(ring) < 3:
         return None, class_id, "fully-out-of-frustum"

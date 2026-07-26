@@ -89,6 +89,32 @@ def test_region_override_file_applies():
         assert "bad" not in lib.region_overrides                  # malformed skipped
 
 
+def test_invalid_region_metadata_falls_back_to_defaults():
+    with tempfile.TemporaryDirectory() as base:
+        _make_tree(base)
+        override = {
+            "charizard": [0.8, 0.2, 0.1, 0.5],
+            "pikachu": [0.1, 0.2, float("inf"), 0.5],
+        }
+        with open(os.path.join(base, config.PICTURE_REGIONS_FILENAME), "w") as fh:
+            json.dump(override, fh)
+        lib = cardsource.CardLibrary(root=base)
+        assert not lib.region_overrides
+
+
+def test_duplicate_filename_stems_raise():
+    with tempfile.TemporaryDirectory() as base:
+        _make_tree(base)
+        with open(os.path.join(base, "set2", "CHARIZARD.jpg"), "wb") as fh:
+            fh.write(b"duplicate")
+        try:
+            cardsource.CardLibrary(root=base)
+        except RuntimeError as exc:
+            assert "Duplicate card filename stems" in str(exc)
+        else:
+            raise AssertionError("duplicate card IDs must fail during discovery")
+
+
 def test_selection_is_seed_deterministic():
     with tempfile.TemporaryDirectory() as base:
         _make_tree(base)

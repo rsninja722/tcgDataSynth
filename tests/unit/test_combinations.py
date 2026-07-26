@@ -186,6 +186,15 @@ def test_display_case_capped_at_24_cards():
     assert seen_max == C.DISPLAY_CASE_MAX_CARDS, f"cap never reached (max {seen_max})"
 
 
+def test_display_case_external_cap_keeps_grid_metadata_consistent():
+    for seed in range(30):
+        cfg = C.sample_scene_config({"layouts": ["display_case"]}, seed, max_cards=3)
+        cols = cfg.layout.params["cols"]
+        rows = cfg.layout.params["rows"]
+        assert len(cfg.cards) == 3
+        assert rows == (len(cfg.cards) + cols - 1) // cols
+
+
 def test_binder_cards_match_content_type():
     for seed in range(150):
         cfg = _sample(seed, layouts=["binder"])
@@ -216,6 +225,25 @@ def test_unsatisfiable_layout_raises():
         pass
     else:
         raise AssertionError("expected ConfigError for unsatisfiable display_case")
+
+
+def test_top_card_does_not_reenable_disabled_protections():
+    import numpy as np
+    try:
+        C.sample_top_card(np.random.default_rng(1), {"protections": ["semi_rigid"]})
+    except C.ConfigError:
+        pass
+    else:
+        raise AssertionError("top-card sampling must honor disabled protections")
+
+
+def test_max_cards_must_be_positive():
+    try:
+        C.sample_scene_config(None, 1, max_cards=0)
+    except C.ConfigError:
+        pass
+    else:
+        raise AssertionError("max_cards=0 must be rejected")
 
 
 # --------------------------------------------------------------------------- #

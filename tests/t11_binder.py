@@ -6,7 +6,7 @@ reflections, colorful prisms/cylinders AND the non-sun lights are placed BEHIND 
 camera so they show up only as reflections. Every filled, front-facing, in-frame card
 is labeled with its holo tag.
 
-HOW TO RUN (headless; cv2 in Blender):
+HOW TO RUN (headless; cv2 and shapely are required in Blender's Python):
     "C:\\Program Files\\Blender Foundation\\Blender 5.0\\blender.exe" -b -P tests/t11_binder.py
 
 OUTPUT (out/): t11_binder_<grid>_<page>_<content>.png + .txt (x4). Verify e.g.:
@@ -38,7 +38,7 @@ from blender import layouts  # noqa: E402
 from blender.labeling import label_scene  # noqa: E402
 from blender.render_setup import setup_render  # noqa: E402
 from blender import scene_common as sc  # noqa: E402
-from labeltools.yolo_pose import write_poly_label_file, write_dataset_yaml  # noqa: E402
+from labeltools.yolo_pose import write_poly_label_file  # noqa: E402
 
 try:
     from texturegen.cardsource import CardLibrary
@@ -161,7 +161,6 @@ def main():
     os.makedirs(cache, exist_ok=True)
     for i, (grid, page_color, content) in enumerate(SCENES):
         run_scene(i, grid, page_color, content, lib, cache)
-    write_dataset_yaml(os.path.join(_ROOT, config.OUTPUT.root, "dataset.yaml"))
     print("\n[t11] done. 4 binder scenes cover all grids/page-types/content. Visualize each.")
 
 

@@ -53,12 +53,11 @@ class CardLabel:
     """One card instance's label data (already normalized, top-left origin).
 
     `corners` holds the keypoints in order: exactly 4 (TL,TR,BR,BL) for a full
-    'card' (class 0), or 3-5 points for a 'partial_card' (class 1) — its in-frustum
-    corners plus the 2 frustum-boundary crossing points. bbox is the min/max
-    envelope of whatever points are present.
+    'card' (class 0), or 3-8 clipped-boundary points for a 'partial_card' (class 1).
+    bbox is the min/max envelope of whatever points are present.
     """
     card_id: str
-    corners: Tuple[Corner, ...]                      # 4 for card, 3-5 for partial_card
+    corners: Tuple[Corner, ...]                      # 4 for card, 3-8 for partial_card
     holo_tag: str = "none"                           # none | full | holo | reverse
     class_id: int = config.YOLO_CLASS_ID
     visibility: int = config.KPT_VISIBILITY
@@ -98,6 +97,8 @@ def parse_pose_line(line: str) -> ParsedLabel:
         if len(segs) >= 3:
             holo_tag = segs[2].strip()
     toks = line.split()
+    if len(toks) < 14 or (len(toks) - 5) % 3 != 0:
+        raise ValueError(f"Invalid pose label token count: {line!r}")
     class_id = int(float(toks[0]))
     cx, cy, w, h = (float(t) for t in toks[1:5])
     kpt_toks = toks[5:]
@@ -105,7 +106,7 @@ def parse_pose_line(line: str) -> ParsedLabel:
     vis: List[int] = []
     for i in range(0, len(kpt_toks), 3):
         x, y = float(kpt_toks[i]), float(kpt_toks[i + 1])
-        v = int(float(kpt_toks[i + 2])) if i + 2 < len(kpt_toks) else 2
+        v = int(float(kpt_toks[i + 2]))
         corners.append((x, y))
         vis.append(v)
     return ParsedLabel(class_id, (cx, cy, w, h), corners, vis, card_id, holo_tag)
@@ -172,11 +173,13 @@ def parse_poly_line(line: str) -> ParsedPoly:
         if len(segs) >= 3:
             holo_tag = segs[2].strip()
     toks = line.split()
+    if len(toks) < 14 or (len(toks) - 5) % 3 != 0:
+        raise ValueError(f"Invalid polygon label token count: {line!r}")
     class_id = int(float(toks[0]))
     x0, y0, x1, y1 = (float(t) for t in toks[1:5])
     pt_toks = toks[5:]
     points: List[TaggedPoint] = []
-    for i in range(0, len(pt_toks) - 2, 3):
+    for i in range(0, len(pt_toks), 3):
         points.append((float(pt_toks[i]), float(pt_toks[i + 1]), int(float(pt_toks[i + 2]))))
     return ParsedPoly(class_id, ((x0, y0), (x1, y1)), points, card_id, holo_tag)
 
@@ -209,7 +212,7 @@ def write_dataset_yaml(
 
     Written by hand (no PyYAML dependency) to keep this module dependency-free.
     kpt_shape describes the full 'card' class (4 corners); a 'partial_card' carries
-    a variable 3-5 keypoints (see config.PARTIAL_KPT_RANGE) — noted here for humans.
+    a variable 3-8 keypoints (see config.PARTIAL_KPT_RANGE) — noted here for humans.
     """
     kx, ky = config.KPT_SHAPE
     pmin, pmax = config.PARTIAL_KPT_RANGE
@@ -222,8 +225,7 @@ def write_dataset_yaml(
         f"kpt_shape: [{kx}, {ky}]\n"
         f"# keypoint order (class 0 'card'): {', '.join(config.KEYPOINT_ORDER)} "
         f"(card's own upright frame)\n"
-        f"# class 1 'partial_card' carries {pmin}-{pmax} keypoints: in-frustum corners "
-        f"+ 2 frustum-edge crossing points\n"
+        f"# class 1 'partial_card' carries {pmin}-{pmax} clipped-boundary points\n"
         f"names:\n{names}\n"
     )
     os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)

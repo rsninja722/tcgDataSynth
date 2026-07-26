@@ -1,7 +1,6 @@
 """
 Docker unit tests for labeltools/occlusion.py (occlusion second pass) and the custom
-PolyLabel format. Pure-python; uses shapely (occlusion carving is skipped without it,
-so the carving tests are guarded).
+PolyLabel format. Pure-python; Shapely is required because carving is core behavior.
 
 Run:  python3 tests/unit/test_occlusion.py
 """
@@ -52,8 +51,6 @@ def test_partial_has_created_points():
 
 
 def test_occluder_below_threshold_no_change():
-    if not occ._HAVE_SHAPELY:
-        return
     # Small occluder covering ~11% (<25%) of the card -> unchanged 4 corners.
     small = ([(0.2, 0.6, 0.5), (0.4, 0.6, 0.5), (0.4, 0.8, 0.5), (0.2, 0.8, 0.5)][:4])
     small_xy = [(x, y) for (x, y, _z) in [(0.2, 0.6, 0), (0.4, 0.6, 0), (0.4, 0.8, 0), (0.2, 0.8, 0)]]
@@ -62,8 +59,6 @@ def test_occluder_below_threshold_no_change():
 
 
 def test_occluder_carves_and_removes_corners():
-    if not occ._HAVE_SHAPELY:
-        return
     # Occluder covers the RIGHT ~half (>25%), nearer than the card -> TR/BR removed,
     # replaced by two created (flag-5) points on the cut line; TL/BL survive.
     occ_xy = [(0.5, 0.1), (0.95, 0.1), (0.95, 0.9), (0.5, 0.9)]
@@ -77,8 +72,6 @@ def test_occluder_carves_and_removes_corners():
 
 
 def test_occluder_behind_card_ignored():
-    if not occ._HAVE_SHAPELY:
-        return
     occ_xy = [(0.5, 0.1), (0.95, 0.1), (0.95, 0.9), (0.5, 0.9)]
     # depth 0.7 > card 0.5 => occluder is BEHIND the card => ignored.
     pts, cls, _ = occ.compute_bound("c", FULL, True, occluders=[(occ_xy, 0.7)], card_depth=0.5)
@@ -86,8 +79,6 @@ def test_occluder_behind_card_ignored():
 
 
 def test_multiple_occluders_carve_in_turn():
-    if not occ._HAVE_SHAPELY:
-        return
     right = [(0.55, 0.1), (0.95, 0.1), (0.95, 0.9), (0.55, 0.9)]
     top = [(0.1, 0.55), (0.9, 0.55), (0.9, 0.95), (0.1, 0.95)]
     pts, cls, _ = occ.compute_bound("c", FULL, True,
@@ -98,8 +89,6 @@ def test_multiple_occluders_carve_in_turn():
 
 
 def test_interior_occluder_hole_is_bridged():
-    if not occ._HAVE_SHAPELY:
-        return
     # Occluder fully INSIDE the card (>25%) -> difference has a hole -> bridged into a
     # single perimeter ring (keyhole). Must stay a valid single ring, no crash.
     inner = [(0.3, 0.3), (0.7, 0.3), (0.7, 0.7), (0.3, 0.7)]

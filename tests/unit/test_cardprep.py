@@ -34,6 +34,9 @@ def test_physical_normal_cached_and_normal_like():
         assert nm.shape[2] == 3 and nm[:, :, 0].mean() > 150   # B(=+Z after BGR read) high
         # cached: second call returns the same path without regenerating
         assert cardprep.physical_normal_path(card, cache) == p
+        # Generation settings are part of the cache identity.
+        assert cardprep.physical_normal_path(card, cache, seed=1) != p
+        assert cardprep.physical_normal_path(card, cache, strength=2.0) != p
 
 
 def test_damage_no_flags_returns_original():
@@ -56,6 +59,17 @@ def test_damage_composites_and_varies_by_seed():
         # different instance seed -> different wear
         p2 = cardprep.damaged_card_path(card, cache, seed=2, dirt=True, scratches=True, surface=True)
         assert not np.array_equal(cv2.imread(p1), cv2.imread(p2))
+
+
+def test_cache_identity_changes_when_source_changes():
+    with tempfile.TemporaryDirectory() as d:
+        card = os.path.join(d, "c.png")
+        cache = os.path.join(d, "cache")
+        _write_fake_card(card)
+        p1 = cardprep.physical_normal_path(card, cache)
+        _write_fake_card(card, w=300, h=420)
+        p2 = cardprep.physical_normal_path(card, cache)
+        assert p1 != p2
 
 
 def _run_all():

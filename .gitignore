@@ -1,1 +1,13 @@
-/out
+/out/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+.idea/
+.vscode/
+*.blend1
+*.blend2

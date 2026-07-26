@@ -4,7 +4,7 @@ and orientations; random textured prisms + cylinders are scattered in the backgr
 behind a background plane. Full pipeline driven by a SceneConfig; every eligible card
 (front-facing + in frustum) is labeled, with the holo tag.
 
-HOW TO RUN (headless; cv2 in Blender recommended):
+HOW TO RUN (headless; cv2 and shapely are required in Blender's Python):
     "C:\\Program Files\\Blender Foundation\\Blender 5.0\\blender.exe" -b -P tests/t09_floating.py
 
 OUTPUT (out/): t09_floating.png + t09_floating.txt. Verify:
@@ -35,7 +35,7 @@ from blender import layouts  # noqa: E402
 from blender.labeling import label_scene  # noqa: E402
 from blender.render_setup import setup_render  # noqa: E402
 from blender import scene_common as sc  # noqa: E402
-from labeltools.yolo_pose import write_poly_label_file, write_dataset_yaml  # noqa: E402
+from labeltools.yolo_pose import write_poly_label_file  # noqa: E402
 
 try:
     from texturegen.cardsource import CardLibrary
@@ -125,7 +125,6 @@ def main():
     scene.render.filepath = os.path.join(out_dir, "t09_floating.png")
     bpy.ops.render.render(write_still=True)
     write_poly_label_file(os.path.join(out_dir, "t09_floating.txt"), labels)
-    write_dataset_yaml(os.path.join(out_dir, "dataset.yaml"))
     print(f"\n[t09] labeled {len(labels)}/{len(instances)} cards; removed {removed}. "
           f"Visualize out/t09_floating.png + .txt")
 

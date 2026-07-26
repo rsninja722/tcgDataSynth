@@ -4,8 +4,8 @@ SceneConfig (from rules/combinations.py) into actual Blender objects: full card
 instances (base unit + finish + damage + physical texture + protection), assembled
 per CardConfig. Layout modules position the returned instances.
 
-Requires cv2 in Blender's Python for damage/physical/holo-pattern generation; falls
-back to a plain textured card if cv2 is missing.
+Requires cv2 in Blender's Python for damage/physical/holo-pattern generation. Missing
+dependencies are fatal because a plain-texture fallback would contradict labels/config.
 """
 from __future__ import annotations
 
@@ -30,8 +30,18 @@ try:
     from texturegen import holo, cardprep
     _HAVE_CV2 = True
 except Exception as exc:  # noqa: BLE001
-    print(f"[scene_builder] cv2/texturegen unavailable ({exc}); cards use plain textures.")
     _HAVE_CV2 = False
+    _TEXTURE_IMPORT_ERROR = exc
+else:
+    _TEXTURE_IMPORT_ERROR = None
+
+
+def require_texture_dependencies() -> None:
+    if not _HAVE_CV2:
+        raise RuntimeError(
+            "OpenCV and texturegen are required for scene generation. Install "
+            "opencv-python-headless into Blender's bundled Python."
+        ) from _TEXTURE_IMPORT_ERROR
 
 
 @dataclass
@@ -89,14 +99,13 @@ def protection_half_thickness(pcfg) -> float:
 
 
 def _gen_holo_pattern(pattern: str, cache_dir: str, seed: int):
-    if not _HAVE_CV2:
-        return None, None
+    require_texture_dependencies()
     w, h = 504, 704
     g = holo.holo_pattern(w, h, pattern, seed)
     p = os.path.join(cache_dir, f"holo_pat_{pattern}_{seed}.png")
     n = os.path.join(cache_dir, f"holo_nrm_{pattern}_{seed}.png")
-    cv2.imwrite(p, g)
-    cv2.imwrite(n, holo.pattern_normal(g)[:, :, ::-1])
+    if not cv2.imwrite(p, g) or not cv2.imwrite(n, holo.pattern_normal(g)[:, :, ::-1]):
+        raise RuntimeError(f"Could not write holo pattern cache under {cache_dir}")
     return p, n
 
 
@@ -104,12 +113,12 @@ def _front_and_physical(card_img, damage, physical: bool, cache_dir: str, seed: 
     """Return (front_image_path, physical_normal_path)."""
     front = card_img.path
     phys = None
-    if _HAVE_CV2:
-        front = cardprep.damaged_card_path(card_img.path, cache_dir, seed,
-                                           dirt=damage.dirt, scratches=damage.scratches,
-                                           surface=damage.surface)
-        if physical:
-            phys = cardprep.physical_normal_path(card_img.path, cache_dir)
+    require_texture_dependencies()
+    front = cardprep.damaged_card_path(card_img.path, cache_dir, seed,
+                                       dirt=damage.dirt, scratches=damage.scratches,
+                                       surface=damage.surface)
+    if physical:
+        phys = cardprep.physical_normal_path(card_img.path, cache_dir)
     return front, phys
 
 
@@ -117,8 +126,6 @@ def _finish_material(name, finish, front, phys, card_img, cache_dir, seed):
     if finish.kind == "normal":
         return finishes.make_normal_material(name + "_fin", front, physical_normal_path=phys)
     pat, nrm = _gen_holo_pattern(finish.holo_pattern, cache_dir, seed)
-    if pat is None:
-        return finishes.make_normal_material(name + "_fin", front, physical_normal_path=phys)
     return finishes.make_holo(name + "_fin", "spectral", front, pat, nrm,
                               card_img.picture_region, finish.holo_region,
                               finish.holo_pattern, physical_normal_path=phys)
@@ -172,6 +179,7 @@ def _add_protection(name, card, pcfg, rng) -> (object, List[object]):
 
 def build_card_instance(name: str, card_cfg, card_img, cache_dir: str, rng) -> CardInstance:
     """Assemble one full card instance from a CardConfig + selected card image."""
+    require_texture_dependencies()
     seed = int(rng.integers(0, 2 ** 30))
     front, phys = _front_and_physical(card_img, card_cfg.damage,
                                       card_cfg.finish.physical_texture, cache_dir, seed)

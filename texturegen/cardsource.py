@@ -12,6 +12,7 @@ scene RNG and then loads the returned path as an image texture.
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -79,12 +80,21 @@ def load_picture_regions(
     for d in search_dirs:
         candidate = os.path.join(d, filename)
         if os.path.isfile(candidate):
-            with open(candidate, "r", encoding="utf-8") as fh:
-                raw = json.load(fh)
+            try:
+                with open(candidate, "r", encoding="utf-8") as fh:
+                    raw = json.load(fh)
+            except (OSError, json.JSONDecodeError):
+                return {}
+            if not isinstance(raw, dict):
+                return {}
             out: Dict[str, Tuple[float, float, float, float]] = {}
             for cid, region in raw.items():
                 try:
                     x0, y0, x1, y1 = (float(v) for v in region)
+                    if not all(math.isfinite(v) for v in (x0, y0, x1, y1)):
+                        continue
+                    if not (0.0 <= x0 < x1 <= 1.0 and 0.0 <= y0 < y1 <= 1.0):
+                        continue
                     out[str(cid)] = (x0, y0, x1, y1)
                 except (TypeError, ValueError):
                     continue  # skip malformed entry, keep going
@@ -116,6 +126,13 @@ class CardLibrary:
     ) -> None:
         self.root = root or config.card_image_root()
         self.paths: List[str] = discover_card_paths(self.root, exts)
+        by_id: Dict[str, List[str]] = {}
+        for path in self.paths:
+            by_id.setdefault(card_id_from_path(path).casefold(), []).append(path)
+        duplicates = [paths for paths in by_id.values() if len(paths) > 1]
+        if duplicates:
+            detail = "; ".join(", ".join(paths) for paths in duplicates)
+            raise RuntimeError(f"Duplicate card filename stems are not allowed: {detail}")
         search = list(region_search_dirs) if region_search_dirs else [self.root, os.getcwd()]
         self.region_overrides = load_picture_regions(search)
 

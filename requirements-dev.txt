@@ -1,11 +1,6 @@
-# Docker-side (bpy-FREE) dev/test dependencies for rules/, texturegen/, postfx/, labeltools/.
-# Blender ships its own bundled numpy at runtime; this is only for testing the pure-Python
-# modules in the container.
-#
-# Install (note: container /tmp is a tiny tmpfs — redirect TMPDIR to overlay disk or you'll
-# hit "No space left on device"):
-#   export TMPDIR=<scratchpad>/piptmp; export PIP_CACHE_DIR=$TMPDIR/cache
-#   pip install --break-system-packages --no-cache-dir -r requirements-dev.txt
-numpy
-opencv-python-headless
-pillow
+# Docker-side dependencies for the bpy-free modules and unit tests.
+# Keep these compatible with Blender 5.0's Python 3.11 / NumPy 1.26 runtime.
+numpy>=1.26,<3
+opencv-python-headless>=4.8,<5
+pillow>=10,<13
+shapely>=2,<3

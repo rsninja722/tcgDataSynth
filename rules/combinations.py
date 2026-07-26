@@ -369,7 +369,7 @@ def sample_top_card(rng, enabled_options=None) -> CardConfig:
     opts = _resolve(enabled_options)
     choices = [p for p in DISPLAY_CASE_TOP_PROTECTIONS if p in opts["protections"]]
     if not choices:
-        choices = list(DISPLAY_CASE_TOP_PROTECTIONS)
+        raise ConfigError("No enabled protection is valid for a display-case top card.")
     kind = _choice(rng, choices)
     return _make_card(rng, opts, slot_index=-1, protection_kind=kind, allow_back=False)
 
@@ -460,13 +460,18 @@ def sample_scene_config(enabled_options: Optional[Dict[str, Any]], rng_seed: int
                         max_cards: Optional[int] = None) -> SceneConfig:
     """Sample ONE validated scene config from a seed. Deterministic per seed.
     `max_cards` (if given) caps the number of cards in the scene."""
+    if max_cards is not None and int(max_cards) < 1:
+        raise ConfigError("max_cards must be at least 1.")
     opts = _resolve(enabled_options)
     rng = np.random.default_rng(rng_seed)
     layout, cards = _sample_layout_and_cards(rng, opts)
     if max_cards is not None and len(cards) > max_cards:
-        cards = cards[:max(1, int(max_cards))]
+        cards = cards[:int(max_cards)]
         if layout.kind == "binder":
             layout.params["filled_slots"] = layout.params["filled_slots"][:len(cards)]
+        elif layout.kind == "display_case":
+            cols = int(layout.params["cols"])
+            layout.params["rows"] = (len(cards) + cols - 1) // cols
     cfg = SceneConfig(
         seed=int(rng_seed),
         layout=layout,

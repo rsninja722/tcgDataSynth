@@ -3,20 +3,19 @@ Phase 4 (layout 1/5) - TABLE. First full-pipeline scene: a SceneConfig from
 rules/combinations drives assembled card instances (finish + damage + physical +
 protection) laid out on a cluttered table, then every eligible card is labeled.
 
-Validates multi-instance labeling + the frustum-containment rule: the LAST card is
-deliberately shoved half out of frame and must NOT be labeled (its corners leave
-the frustum), while the others are.
+Validates multi-instance labeling and frustum handling: the last card is deliberately
+shoved fully out of frame and must not be labeled, while the others are.
 
-HOW TO RUN (headless; cv2 in Blender recommended for finish/damage):
+HOW TO RUN (headless; cv2 and shapely are required in Blender's Python):
     "C:\\Program Files\\Blender Foundation\\Blender 5.0\\blender.exe" -b -P tests/t08_table.py
 
-OUTPUT (out/): t08_table.png + t08_table.txt (YOLO-pose, one line per labeled card).
+OUTPUT (out/): t08_table.png + t08_table.txt (custom polygon labels).
 Then verify labels:
     python3 labeltools/visualize.py out/t08_table.png out/t08_table.txt
 
 REPORT BACK: attach t08_table_viz.png + paste console. PASS if: multiple cards on a
 table with varied finishes/protection; every in-frame front-facing card is boxed with
-corners on its sharp corners; the deliberately half-out card is NOT labeled.
+corners on its sharp corners; the deliberately out-of-frame card is not labeled.
 """
 import os
 import sys
@@ -41,7 +40,7 @@ from blender import scene_builder as sb  # noqa: E402
 from blender.labeling import label_scene  # noqa: E402
 from blender.render_setup import setup_render  # noqa: E402
 from blender import scene_common as sc  # noqa: E402
-from labeltools.yolo_pose import write_poly_label_file, write_dataset_yaml  # noqa: E402
+from labeltools.yolo_pose import write_poly_label_file  # noqa: E402
 
 try:
     from texturegen.cardsource import CardLibrary
@@ -135,7 +134,6 @@ def main():
     scene.render.filepath = os.path.join(out_dir, "t08_table.png")
     bpy.ops.render.render(write_still=True)
     write_poly_label_file(os.path.join(out_dir, "t08_table.txt"), labels)
-    write_dataset_yaml(os.path.join(out_dir, "dataset.yaml"))
     print(f"\n[t08] labeled {len(labels)}/{len(instances)} cards; "
           f"removed {removed} out-of-frustum (mode={params['out_of_frustum']}). "
           f"Visualize out/t08_table.png + .txt")

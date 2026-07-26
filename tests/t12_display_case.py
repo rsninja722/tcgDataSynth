@@ -10,7 +10,7 @@ Scene 0 is rendered at THREE zoom levels: 'out' (whole case small in frame), 'fu
 (default), 'in' (most zoomed in -> only a few cards fully in frame, the rest become
 partial_card). Scene 0 also shoves the LAST card fully out to show it is unlabeled.
 
-HOW TO RUN (headless; cv2 in Blender recommended):
+HOW TO RUN (headless; cv2 and shapely are required in Blender's Python):
     "C:\\Program Files\\Blender Foundation\\Blender 5.0\\blender.exe" -b -P tests/t12_display_case.py
 
 OUTPUT (out/): t12_case_<content>_<flat|tilt25>_<CxR>_<out|full|in>.png + .txt. Verify e.g.:
@@ -43,7 +43,7 @@ from blender import layouts  # noqa: E402
 from blender.labeling import label_scene  # noqa: E402
 from blender.render_setup import setup_render  # noqa: E402
 from blender import scene_common as sc  # noqa: E402
-from labeltools.yolo_pose import write_poly_label_file, write_dataset_yaml  # noqa: E402
+from labeltools.yolo_pose import write_poly_label_file  # noqa: E402
 
 try:
     from texturegen.cardsource import CardLibrary
@@ -128,7 +128,7 @@ def run_scene(i, content, tilt, cols, rows, lib, cache, modes=("full",), shove_l
     instances, extent = layouts.build_display_case(cfg, lib, cache, rng)
 
     if shove_last and instances:
-        instances[-1].root.location.x += extent      # fully out of frame -> unlabeled
+        instances[-1].root.location.x += extent * 10.0  # outside even the widest framing
         bpy.context.view_layer.update()
 
     tiltname = "tilt25" if tilt else "flat"
@@ -176,7 +176,6 @@ def main():
         # view crops edge cards into 'partial_card' labels. Others use the full frame.
         modes = ("out", "full", "in") if i == 0 else ("full",)
         run_scene(i, content, tilt, cols, rows, lib, cache, modes=modes, shove_last=(i == 0))
-    write_dataset_yaml(os.path.join(_ROOT, config.OUTPUT.root, "dataset.yaml"))
     print("\n[t12] done. Scene 0 at 3 zooms (out/full/in), scenes 1-3 full. "
           "Visualize each; scene 0's shoved card must be unlabeled; the zoomed-in "
           "view should show orange 'partial_card' boxes with on-edge keypoints.")

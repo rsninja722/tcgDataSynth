@@ -1,83 +1,82 @@
-# tcgDataSynth — Synthetic dataset generator for trading-card corner detection
+# tcgDataSynth
 
-Blender 5.0 renders randomized trading-card scenes and auto-emits Ultralytics
-YOLO-pose labels (4 corner keypoints per card) for training a corner-detection model.
+Blender 5.0 synthetic-scene generator for training trading-card detectors. It builds randomized cards, protection, finishes, damage, layouts, and labels while keeping geometry-independent logic testable outside Blender.
 
-## Working protocol (important)
+## Current State
 
-Development happens in a **headless Docker container with no Blender and no GUI**.
-All `bpy` code is therefore *unverified by the author* — it is delivered as small,
-numbered test scripts under `tests/` that **you (the user) run in your Blender 5.0**
-and report back on. Pure-Python modules (`rules/`, `texturegen/`, `postfx/`,
-`labeltools/`) are unit-tested in Docker before integration.
+Phases 0-3 are implemented. Phase 4 has table, floating, binder, and display-case layouts; the display-case and new occlusion-aware label path await a Blender verification run. The hand layout and Phases 5-8 are not implemented.
 
-We proceed **one phase at a time** and do not advance until you confirm the current
-phase's test passed.
+See `PROJECT_STATUS.md` for the active checkpoint, validated decisions, and next work. See `LABEL_FORMAT.md` before consuming labels.
 
-## Layout
+## Development Model
 
-```
-rules/        pure python: combination rules, config sampling      [Docker-tested]
-texturegen/   pure python: normal maps, holo masks, damage overlays[Docker-tested]
-postfx/       pure python: sensor/compression/WB effects           [Docker-tested]
-labeltools/   pure python: label writing, validation, visualization[Docker-tested]
-blender/      bpy-only: assets_build, card_factory, layouts, lighting, camera, labeling, render loop
-blender/addon/GUI panel add-on
-tests/        numbered manual test scripts you run in Blender
-assets/       built asset library .blend + source meshes
-cards/        (your card images live here or wherever you point us)
-out/          renders + labels from tests and production
+The development container has no Blender or GUI. Code is split accordingly:
+
+```text
+rules/          deterministic scene sampling and legality
+texturegen/     OpenCV/NumPy texture generation
+postfx/         render post-processing (not implemented yet)
+labeltools/     label geometry, serialization, and visualization
+blender/        bpy-only scene construction and rendering
+tests/unit/     container-runnable tests
+tests/t*.py     numbered Blender acceptance scripts
+assets/         checked-in generated texture assets
+out/            generated output (ignored)
 ```
 
-## Required libraries
+Substantial Blender changes are delivered through a focused numbered script, then paused for user feedback before the next major change.
 
-### Blender's bundled Python (gen-time)
+## Container Setup
 
-The generator calls these from inside Blender, so they must be installed into
-**Blender's own Python**, not your system Python. Run each in an **admin** terminal
-(replace the path if your Blender lives elsewhere):
+Python 3.11 is expected.
 
-```
-"C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe" -m pip install opencv-python-headless
-"C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe" -m pip install shapely
-```
-
-| Package                 | Used for                                                        | If missing |
-|-------------------------|-----------------------------------------------------------------|------------|
-| `opencv-python-headless`| damage overlays + physical-texture normal maps at gen time      | falls back to plain textures (no damage/etched foil) |
-| `shapely`               | occlusion-aware label pass (polygon boolean for carved bounds)  | occlusion carving skipped; frustum bounds still emitted |
-
-### Docker / system Python (pure-Python unit tests)
-
-```
-pip install --break-system-packages --no-cache-dir numpy opencv-python-headless pillow shapely
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+bash run_unit_tests.sh
+.venv/bin/python -m compileall -q .
 ```
 
-(`rules/`, `texturegen/`, `postfx/`, `labeltools/` are unit-tested here before integration.)
+`run_unit_tests.sh` fails early when required dependencies are absent. Shapely is mandatory because silently omitting occlusion would produce incorrect labels.
 
-## Conventions
+## Blender Setup
 
-- Units: **meters**, real-world scale. Card = 0.063 × 0.088 × 0.00045 m.
-- All randomness flows from a single seeded `numpy.random.Generator`.
-- Every image is reproducible from one integer seed (recorded in a manifest).
+The known Blender executable is:
 
-## Phase status
-
-- [ ] **Phase 0** — API ground truth. Run `tests/t00_api_introspection.py`. ← *you are here*
-- [ ] Phase 1 — One bare card + labels (end-to-end labeling skeleton)
-- [ ] Phase 2 — Card factory + protection assets
-- [ ] Phase 3 — Finishes & damage (texturegen)
-- [ ] Phase 4 — Layouts (table → floating → binder → display case → hand)
-- [ ] Phase 5 — Lighting & camera randomization
-- [ ] Phase 6 — Post effects (postfx)
-- [ ] Phase 7 — GUI + orchestration (start/pause, resume-safe)
-- [ ] Phase 8 — Throughput + 50-image pilot
-
-## Run Phase 0 now
-
-```
-blender -b -P tests/t00_api_introspection.py
+```text
+C:\Program Files\Blender Foundation\Blender 5.0\blender.exe
 ```
 
-Then paste the console output or attach `out/phase0_api_report.txt`.
+Install runtime dependencies into Blender's bundled Python from an administrator terminal:
+
+```bat
+"C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe" -m pip install opencv-python-headless shapely
 ```
+
+Card images default to the path in `config.py`. Override it without editing code:
+
+```bat
+set TCG_CARD_IMAGE_ROOT=C:\path\to\card-images
+```
+
+The image root must contain `back.png`. Optional `picture_regions.json` entries use `{card_id: [x0, y0, x1, y1]}` normalized from the image's top-left.
+
+## Active Acceptance Run
+
+The next user verification is:
+
+```bat
+"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" -b -P tests\t12_display_case.py
+```
+
+Then visualize each emitted pair, for example:
+
+```bash
+python3 labeltools/visualize.py out/t12_case_toploader_flat_5x5_in.png out/t12_case_toploader_flat_5x5_in.txt
+```
+
+Report the Blender console output and attach the `*_viz.png` files. Expected details are in the test script header and `PROJECT_STATUS.md`.
+
+## Important Constraint
+
+The current production path writes a custom occlusion-aware polygon format, not valid Ultralytics YOLO-pose input. `write_dataset_yaml()` remains only for the legacy fixed-corner path. A downstream training adapter or export decision is required before pilot-dataset generation.

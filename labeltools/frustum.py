@@ -132,10 +132,10 @@ def classify(
         corners_yolo = [ndc_to_yolo(x, y) for (x, y, _z) in ndc_corners]
         return CardLabel(card_id, tuple(corners_yolo), holo_tag=holo_tag,
                          class_id=config.YOLO_CLASS_ID), "labeled"
-    # A corner BEHIND the camera makes its 2D projection meaningless, so only clip in
-    # 2D when the whole card is in front. If any corner is behind and none is genuinely
-    # visible (in front + in frame), treat the card as outside.
-    if any(z <= _Z_EPS for (_x, _y, z) in ndc_corners) and n_in == 0:
+    # A corner at/behind the camera makes its projected 2D polygon invalid. Properly
+    # supporting this case requires clipping in 3D against the near plane first.
+    # Until then, reject it rather than emitting a corrupt partial polygon.
+    if any(z <= _Z_EPS for (_x, _y, z) in ndc_corners):
         return None, "fully-out-of-frustum"
     poly = _clip_to_unit_square([(x, y) for (x, y, _z) in ndc_corners])
     if len(poly) < 3:                         # no real overlap -> fully outside

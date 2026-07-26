@@ -18,7 +18,7 @@ from bpy_extras.object_utils import world_to_camera_view
 import config
 from labeltools.frustum import classify, is_front_visible
 from labeltools.yolo_pose import CardLabel, PolyLabel
-from labeltools.occlusion import compute_bound
+from labeltools.occlusion import compute_bound, require_shapely
 from blender import scene_builder as sb
 from blender import protection as prot
 
@@ -53,7 +53,7 @@ def label_card(
     """Return (CardLabel|None, reason, debug_rows) for one card object.
 
     reason ∈ {'labeled','labeled-partial','back-facing','fully-out-of-frustum'}.
-    A 'labeled-partial' result carries class 1 (partial_card) with 3-5 keypoints.
+    A 'labeled-partial' result carries class 1 (partial_card) with 3-8 keypoints.
     debug_rows are (corner_index, ndc_x, ndc_y, ndc_z, in_frustum) for inspection.
     holo_tag (none|full|holo|reverse) is written into the label.
     """
@@ -118,9 +118,9 @@ def label_scene(scene, cam, instances, area_frac: float = 0.25):
 
     Returns a list of (instance, PolyLabel|None, reason). Each card's visible-region
     bound is carved by every OTHER card's nearer rectangle(s) that cover > area_frac
-    of its current bound. Requires shapely for the carving (else occlusion is skipped
-    and only the frustum bound is emitted).
+    of its current bound. Shapely is mandatory; missing it is a setup error.
     """
+    require_shapely()
     projected = []   # per instance: (ndc_corners, front_visible, card_depth)
     occ_quads = []   # per instance: list[(quad_2d, depth)]
     for inst in instances:

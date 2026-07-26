@@ -15,8 +15,8 @@ Programmatic:
     from labeltools.visualize import visualize_label_file
     visualize_label_file("out/t01_headon.png", "out/t01_headon.txt", "out/viz.png")
 
-Uses OpenCV (headless ok). Coordinates in the label are normalized top-left origin,
-so pixel = (x * W, y * H) directly — no flip here (the flip happened when writing).
+Uses OpenCV (headless ok). Coordinates in the label are normalized top-left origin.
+Pixel coordinates are `(round(x * W), round(y * H))` clamped to image bounds.
 """
 from __future__ import annotations
 
@@ -56,7 +56,9 @@ except Exception:  # noqa: BLE001
 
 
 def _to_px(x: float, y: float, w: int, h: int):
-    return (int(round(x * w)), int(round(y * h)))
+    px = min(w - 1, max(0, int(round(x * w))))
+    py = min(h - 1, max(0, int(round(y * h))))
+    return (px, py)
 
 
 def draw_label(img: np.ndarray, parsed: ParsedLabel) -> np.ndarray:

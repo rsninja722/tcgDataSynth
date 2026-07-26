@@ -89,7 +89,8 @@ def render_one(version, pattern, az, pat_path, nrm_path, card):
     cam = sc.setup_camera(50, az, 14, dist)
     # Fixed lights per (version,pattern) so only the CAMERA angle changes across az.
     import numpy as np
-    sc.add_lights(cam.location, rng=np.random.default_rng(hash((version, pattern)) % 9999))
+    light_seed = 6000 + VERSIONS.index(version) * 100 + PATTERNS.index(pattern)
+    sc.add_lights(cam.location, rng=np.random.default_rng(light_seed))
 
     bpy.context.view_layer.update()
     lbl, reason, _ = label_card(scene, cam, obj, card_id)

@@ -19,7 +19,7 @@ import cv2  # noqa: E402
 
 import config  # noqa: E402
 from labeltools import yolo_pose as yp  # noqa: E402
-from labeltools.visualize import visualize_label_file, _CORNER_COLORS  # noqa: E402
+from labeltools.visualize import visualize_label_file, _CORNER_COLORS, _to_px  # noqa: E402
 
 
 def test_bbox_envelope():
@@ -114,6 +114,21 @@ def test_visualizer_places_corners_at_expected_pixels():
             diff = np.abs(pixel.astype(np.int16) - expected).sum()
             assert diff <= 30, f"corner {i+1} color {tuple(pixel)} != {_CORNER_COLORS[i]} (diff {diff})"
     print(f"    (wrote {out_path} for eyeball check)")
+
+
+def test_parsers_reject_truncated_triplets():
+    for parser in (yp.parse_pose_line, yp.parse_poly_line):
+        try:
+            parser("0 0.1 0.1 0.9 0.9 0.2 0.2")
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"{parser.__name__} accepted a truncated label")
+
+
+def test_visualizer_clamps_normalized_image_boundaries():
+    assert _to_px(0.0, 0.0, 400, 300) == (0, 0)
+    assert _to_px(1.0, 1.0, 400, 300) == (399, 299)
 
 
 def _run_all():

@@ -129,6 +129,13 @@ def test_behind_camera_not_labeled():
     assert label is None and reason == "fully-out-of-frustum"
 
 
+def test_mixed_camera_plane_card_is_rejected_until_3d_clipping_exists():
+    ndc = [(0.2, 0.8, 0.3), (0.8, 0.8, 0.3),
+           (0.8, 0.2, -0.1), (0.2, 0.2, -0.1)]
+    label, reason = frustum.classify("x", ndc, front_visible=True)
+    assert label is None and reason == "fully-out-of-frustum"
+
+
 def test_corner_in_frustum_bounds():
     assert frustum.corner_in_frustum(0.0, 0.0, 0.1)
     assert frustum.corner_in_frustum(1.0, 1.0, 0.1)

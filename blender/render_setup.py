@@ -67,20 +67,14 @@ def setup_render(scene, engine: Optional[str] = None, verbose: bool = True) -> s
     r.resolution_y = config.RENDER_H
     r.resolution_percentage = 100
     r.image_settings.file_format = "PNG"
-    try:
-        scene.view_settings.view_transform = config.VIEW_TRANSFORM
-    except Exception as exc:  # noqa: BLE001
-        print(f"[render_setup] view_transform {config.VIEW_TRANSFORM!r}: {exc}")
+    scene.view_settings.view_transform = config.VIEW_TRANSFORM
 
     if engine == "CYCLES":
-        try:
-            note = _setup_cycles(scene, config.CYCLES_SAMPLES, config.CYCLES_DEVICE)
-        except Exception as exc:  # noqa: BLE001
-            note = f"CYCLES setup failed ({exc}); falling back to EEVEE"
-            print(f"[render_setup] {note}")
-            note = _setup_eevee(scene, config.EEVEE_RENDER_SAMPLES)
-    else:
+        note = _setup_cycles(scene, config.CYCLES_SAMPLES, config.CYCLES_DEVICE)
+    elif engine == "BLENDER_EEVEE":
         note = _setup_eevee(scene, config.EEVEE_RENDER_SAMPLES)
+    else:
+        raise ValueError(f"Unsupported render engine: {engine!r}")
 
     if verbose:
         print(f"[render_setup] engine -> {note}")
