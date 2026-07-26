@@ -10,9 +10,10 @@ Acceptance focus:
 
 - Coplanar grid cards do not occlude one another.
 - A nearer top card or overlapping card carves the farther card's polygon.
+- Cards with more than 80% of their in-frustum area occluded are not labeled.
 - Created polygon vertices are magenta in the visualizer.
 - Full and partial frustum bounds align with the rendered cards.
-- The optional top card rests flat on the acrylic lid.
+- Every t12 scene has a top card resting flat on the acrylic lid.
 - The table backdrop fills the area below the case.
 
 Do not start the hand layout until this checkpoint is reviewed with the user.
@@ -54,7 +55,7 @@ This is a project blocker before Phase 8: the custom format cannot be passed dir
 ## Known Risks
 
 - The bpy portion of occlusion-aware labeling has not yet been executed by the user.
-- Occlusion currently approximates each card/protection layer with a projected rectangle and mean depth. Intersecting or strongly tilted geometry may need a depth-aware method before the hand layout.
+- Occlusion currently approximates each embedded card with a projected rectangle and mean depth. Intersecting or strongly tilted geometry may need a depth-aware method before the hand layout.
 - The single-ring custom format keeps one connected polygon and bridges holes; disconnected visible regions are not represented exactly.
 - The prebuilt protection-library loader exists but the integrated scene builder still constructs protection geometry per instance. Address sharing before throughput work or earlier if display-case memory is excessive.
 - Some older numbered test headers describe historical implementations. Treat current source and this status as authoritative; update a script when it becomes the active acceptance test.

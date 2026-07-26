@@ -19,8 +19,6 @@ import config
 from labeltools.frustum import classify, is_front_visible
 from labeltools.yolo_pose import CardLabel, PolyLabel
 from labeltools.occlusion import compute_bound, require_shapely
-from blender import scene_builder as sb
-from blender import protection as prot
 
 
 def ideal_corners_local(
@@ -75,30 +73,17 @@ def label_card(
 
 # --------------------------------------------------------------------------- #
 # Occlusion second pass (spec: 2026-07-22 user). Each card is also an OCCLUDER:
-# its physical rectangle(s) hide parts of cards behind it. label_scene runs the
+# its transformed card rectangle hides parts of cards behind it. label_scene runs the
 # frustum pass then carves each card's bound where a nearer rectangle covers >25%.
 # --------------------------------------------------------------------------- #
 def occluder_quads_world(inst):
-    """World-space occluder rectangle(s) for a card instance, per protection (user):
-    bare -> the card rect; sleeve -> the sleeve's outer rect; toploader/semi-rigid/slab
-    -> BOTH plastic layers (front + back). Each quad is 4 world Vectors (TL,TR,BR,BL)."""
-    pcfg = getattr(inst, "protection", None)
-    kind = pcfg.kind if pcfg is not None else "none"
-    mw = inst.root.matrix_world                       # protection is centered on the root
-    fw, fh = sb.protection_footprint(pcfg) if pcfg is not None else (config.CARD_W_M, config.CARD_H_M)
-    hw, hh = fw / 2.0, fh / 2.0
+    """World-space card rectangle used to occlude cards behind this instance.
 
-    def quad(zc):
-        return [mw @ Vector((-hw, +hh, zc)), mw @ Vector((+hw, +hh, zc)),
-                mw @ Vector((+hw, -hh, zc)), mw @ Vector((-hw, -hh, zc))]
-
-    if kind in ("toploader", "semi_rigid"):
-        s = prot.TOPLOADER_GAP / 2.0 + config.CARD_T_M
-        return [quad(+s), quad(-s)]
-    if kind == "slab":
-        s = prot.SLAB_T / 2.0
-        return [quad(+s), quad(-s)]
-    return [quad(config.CARD_T_M / 2.0)]              # bare card / sleeve: one rect
+    The embedded card transform carries the offset and rotation inside a toploader or
+    slab. Clear protection is not treated as an opaque outer rectangle.
+    """
+    mw = inst.card.matrix_world
+    return [[mw @ corner for corner in ideal_corners_local()]]
 
 
 def _project_quads(scene, cam, quads):

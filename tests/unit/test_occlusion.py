@@ -78,6 +78,36 @@ def test_occluder_behind_card_ignored():
     assert _flags(pts) == [1, 2, 4, 3]
 
 
+def test_more_than_80_percent_occluded_drops_label():
+    # FULL spans x=0.2..0.8. Covering x=0.31..0.8 removes 81.67% of its area.
+    heavy = [(0.31, 0.1), (0.9, 0.1), (0.9, 0.9), (0.31, 0.9)]
+    pts, cls, reason = occ.compute_bound(
+        "c", FULL, True, occluders=[(heavy, 0.3)], card_depth=0.5)
+    assert pts is None and cls == 0 and reason == "mostly-occluded"
+
+
+def test_exactly_80_percent_occluded_keeps_label():
+    # Strictly MORE than 80% is removed; x=0.32..0.8 is exactly 80% of FULL.
+    eighty = [(0.32, 0.1), (0.9, 0.1), (0.9, 0.9), (0.32, 0.9)]
+    pts, cls, reason = occ.compute_bound(
+        "c", FULL, True, occluders=[(eighty, 0.3)], card_depth=0.5)
+    assert pts is not None and cls == 0 and reason == "labeled"
+    assert max(p[0] for p in pts) <= 0.32 + 1e-6
+
+
+def test_small_occluders_collectively_over_80_percent_drop_label():
+    # Each strip covers 22.5% and is below the carve threshold, but their non-overlapping
+    # union covers 90% of the original card area and must suppress the label.
+    strips = []
+    for x0 in (0.2, 0.335, 0.47, 0.605):
+        quad = [(x0, 0.1), (x0 + 0.135, 0.1),
+                (x0 + 0.135, 0.9), (x0, 0.9)]
+        strips.append((quad, 0.3))
+    pts, cls, reason = occ.compute_bound(
+        "c", FULL, True, occluders=strips, card_depth=0.5)
+    assert pts is None and cls == 0 and reason == "mostly-occluded"
+
+
 def test_multiple_occluders_carve_in_turn():
     right = [(0.55, 0.1), (0.95, 0.1), (0.95, 0.9), (0.55, 0.9)]
     top = [(0.1, 0.55), (0.9, 0.55), (0.9, 0.95), (0.1, 0.95)]

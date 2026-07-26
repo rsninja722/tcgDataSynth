@@ -51,6 +51,8 @@ def setup_camera(focal_mm: float, azimuth_deg: float, elevation_deg: float,
     cam_data.lens = focal_mm
     cam_data.sensor_fit = "HORIZONTAL"
     cam_data.sensor_width = 36.0
+    cam_data.shift_x = 0.0
+    cam_data.shift_y = 0.0
     cam_data.clip_start = 0.001
     cam_data.clip_end = 100.0
     tgt = Vector(target)

@@ -2,8 +2,8 @@
 Phase 4 (layout 4/5) - DISPLAY CASE (spec §3.5.3). A tight grid of toploadered or
 slabbed cards on a random-material base with side walls, all flat OR all tilted
 forward 25deg, under a scratched/smudged 6mm acrylic cover 40mm above the tallest
-item. Grid capped at 24 cards (user). A 20% chance adds a stray card ON TOP of the
-lid. Every front-facing card that is fully OR partially in the frustum is labeled
+item. Grid capped at 24 cards (user). Every test scene adds a stray card ON TOP of
+the lid. Every front-facing card that is fully OR partially in the frustum is labeled
 (partial -> class 1 'partial_card'); fully-out cards are not labeled.
 
 Scene 0 is rendered at THREE zoom levels: 'out' (whole case small in frame), 'full'
@@ -20,7 +20,10 @@ REPORT BACK: attach each viz. PASS if: cards sit in a tight walled case under a 
 scratched lid ~40mm above them; tilted scenes lean cards forward ~25deg; full cards
 are labeled (white boxes, 4 corners); the ZOOMED-IN view shows orange 'partial_card'
 boxes whose 2 crossing keypoints sit exactly on the frame edge; the shoved card is NOT
-labeled; the 5x5 scene has 24 cards; ~1 in 5 scenes shows a card resting on the lid.
+labeled; label corners and occlusion cuts align with the cards inside their protection;
+cards over 80% occluded have no label; the 5x5 scene has 24 grid cards; every scene
+shows a card resting on the lid. Compare near-edge cards with center cards: direct
+corner labels should remain aligned because clear slab and lid surfaces do not refract.
 """
 import os
 import sys
@@ -87,7 +90,8 @@ def build_case_config(content_type, tilt, cols, rows, rng):
                         DamageConfig(surface=bool(rng.random() < 0.3)))
              for i in range(n)]
     params = {"cols": cols, "rows": rows_eff, "tilt_forward": tilt,
-              "tilt_deg": 25.0 if tilt else 0.0, "cover_scratches": True}
+              "tilt_deg": 25.0 if tilt else 0.0, "cover_scratches": True,
+              "top_card_probability": 1.0}
     base = C.sample_scene_config({"layouts": ["display_case"]}, SEED)
     cfg = SceneConfig(seed=SEED, layout=LayoutConfig("display_case", params), cards=cards,
                       lighting=base.lighting, camera=base.camera, postfx=base.postfx)
@@ -127,8 +131,10 @@ def run_scene(i, content, tilt, cols, rows, lib, cache, modes=("full",), shove_l
     cfg = build_case_config(content, tilt, cols, rows, rng)
     instances, extent = layouts.build_display_case(cfg, lib, cache, rng)
 
-    if shove_last and instances:
-        instances[-1].root.location.x += extent * 10.0  # outside even the widest framing
+    if shove_last and cfg.cards:
+        # TopCard is appended after the configured grid instances, so target the last
+        # grid card explicitly and leave the lid card in place for every test scene.
+        instances[len(cfg.cards) - 1].root.location.x += extent * 10.0
         bpy.context.view_layer.update()
 
     tiltname = "tilt25" if tilt else "flat"
@@ -144,11 +150,13 @@ def run_scene(i, content, tilt, cols, rows, lib, cache, modes=("full",), shove_l
         bpy.context.view_layer.update()
         # Occlusion-aware second pass: cards carve the bounds of cards behind them.
         results = label_scene(scene, cam, instances)
-        labels, n_partial, removed = [], 0, 0
+        labels, n_partial, n_mostly_occluded, removed = [], 0, 0, 0
         for inst, lbl, reason in results:
             if lbl:
                 labels.append(lbl)
                 n_partial += int(reason == "labeled-partial")
+            elif reason == "mostly-occluded":
+                n_mostly_occluded += 1
             elif reason == "fully-out-of-frustum" and scene_params["out_of_frustum"] == "remove":
                 for obj in inst.objects:
                     obj.hide_render = True
@@ -158,7 +166,8 @@ def run_scene(i, content, tilt, cols, rows, lib, cache, modes=("full",), shove_l
         bpy.ops.render.render(write_still=True)
         write_poly_label_file(os.path.join(out_dir, f"{name}.txt"), labels)
         print(f"  {name}: {len(instances)} cards, {len(labels)} labeled "
-              f"({n_partial} partial, removed {removed})")
+              f"({n_partial} partial, {n_mostly_occluded} mostly occluded, "
+              f"removed {removed})")
 
 
 def main():
@@ -177,8 +186,9 @@ def main():
         modes = ("out", "full", "in") if i == 0 else ("full",)
         run_scene(i, content, tilt, cols, rows, lib, cache, modes=modes, shove_last=(i == 0))
     print("\n[t12] done. Scene 0 at 3 zooms (out/full/in), scenes 1-3 full. "
-          "Visualize each; scene 0's shoved card must be unlabeled; the zoomed-in "
-          "view should show orange 'partial_card' boxes with on-edge keypoints.")
+          "Every scene must have a card on the lid. Visualize each; scene 0's shoved "
+          "card must be unlabeled; the zoomed-in view should show orange "
+          "'partial_card' boxes with on-edge keypoints.")
 
 
 if __name__ == "__main__":

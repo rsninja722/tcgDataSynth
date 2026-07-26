@@ -474,12 +474,12 @@ def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
         uv_xform=prot.random_uv_xform(rng, win_range=(0.9, 1.0)),
         wear_uv_xform=prot.random_uv_xform(rng, win_range=(0.9, 1.0))))
 
-    # 20% chance: a stray card lying flat ON TOP of the case lid (any of bare/sleeved/
-    # toploadered/slabbed, per rules.sample_top_card). Its CENTER can be anywhere within
-    # the top face of the case — the four cover corners (±case_w/2, ±case_h/2) are the
-    # limits — so it may hang partly off an edge but is always on the display. It rests
-    # flat on the lid (no tilt/lift, so it never floats) with a random in-plane spin.
-    if float(rng.random()) < 0.20:
+    # By default, a 20% chance adds a stray card lying flat ON TOP of the case lid
+    # (any of bare/sleeved/toploadered/slabbed, per rules.sample_top_card). Acceptance
+    # scenes can override the probability to exercise this geometry every time. Its
+    # CENTER can be anywhere within the top face of the case, so it may hang partly off
+    # an edge but is always on the display.
+    if float(rng.random()) < float(p.get("top_card_probability", 0.20)):
         top_cfg = C.sample_top_card(rng)
         ht_t = sb.protection_half_thickness(top_cfg.protection)
         inst = sb.build_card_instance("TopCard", top_cfg, card_lib.select(rng), cache_dir, rng)

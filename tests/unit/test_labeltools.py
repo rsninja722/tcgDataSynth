@@ -19,7 +19,9 @@ import cv2  # noqa: E402
 
 import config  # noqa: E402
 from labeltools import yolo_pose as yp  # noqa: E402
-from labeltools.visualize import visualize_label_file, _CORNER_COLORS, _to_px  # noqa: E402
+from labeltools.visualize import (visualize_label_file, visualize_poly_label_file,
+                                  _CORNER_COLORS, _FLAG_COLORS, _to_px)  # noqa: E402
+from labeltools.refraction_probe import detect_marker  # noqa: E402
 
 
 def test_bbox_envelope():
@@ -129,6 +131,44 @@ def test_parsers_reject_truncated_triplets():
 def test_visualizer_clamps_normalized_image_boundaries():
     assert _to_px(0.0, 0.0, 400, 300) == (0, 0)
     assert _to_px(1.0, 1.0, 400, 300) == (399, 299)
+
+
+def test_poly_visualizer_uses_non_square_image_dimensions():
+    width, height = 1280, 720
+    points = ((0.0, 0.0, 1), (1.0, 0.0, 2), (1.0, 1.0, 4), (0.0, 1.0, 3))
+    with tempfile.TemporaryDirectory() as d:
+        img_path = os.path.join(d, "img.png")
+        label_path = os.path.join(d, "img.txt")
+        out_path = os.path.join(d, "viz.png")
+        cv2.imwrite(img_path, np.full((height, width, 3), 128, np.uint8))
+        yp.write_poly_label_file(label_path, [yp.PolyLabel("testcard", points)])
+        visualize_poly_label_file(img_path, label_path, out_path)
+        viz = cv2.imread(out_path, cv2.IMREAD_COLOR)
+        for x, y, flag in points:
+            px, py = _to_px(x, y, width, height)
+            pixel = viz[py, px]
+            expected = np.array(_FLAG_COLORS[flag], dtype=np.int16)
+            assert np.abs(pixel.astype(np.int16) - expected).sum() <= 30
+
+
+def test_refraction_probe_detects_marker_centroid_from_linear_difference():
+    baseline = np.zeros((20, 30, 4), dtype=np.float32)
+    probe = baseline.copy()
+    probe[7:10, 12:15, :3] = (2.0, 1.0, 0.5)
+    detected = detect_marker(baseline, probe)
+    assert detected is not None
+    assert abs(detected.x - 13.0) < 0.1 and abs(detected.y - 8.0) < 0.1
+    assert detected.area_px == 9 and detected.energy > 0.0
+
+
+def test_refraction_probe_uses_expected_window():
+    baseline = np.zeros((30, 60, 4), dtype=np.float32)
+    probe = baseline.copy()
+    probe[4:7, 4:7, :3] = 10.0      # Brighter unrelated difference.
+    probe[17:20, 42:45, :3] = 2.0   # Marker near the expected projection.
+    detected = detect_marker(baseline, probe, expected_xy=(43, 18), search_radius_px=8)
+    assert detected is not None
+    assert abs(detected.x - 43.0) < 0.1 and abs(detected.y - 18.0) < 0.1
 
 
 def _run_all():

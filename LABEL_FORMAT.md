@@ -15,6 +15,10 @@ Classes:
 - `0`: the card's four ideal corners are in the camera frustum.
 - `1`: only part of the card intersects the camera frustum.
 
+A front-facing card is omitted entirely when nearer cards cover more than 80% of its
+original in-frustum projected area. Transparent protection does not count as an opaque
+occluder; occlusion follows the embedded card's offset and rotation.
+
 Point flags:
 
 - `1`: original top-left card corner.

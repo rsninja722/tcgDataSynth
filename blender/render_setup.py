@@ -66,6 +66,10 @@ def setup_render(scene, engine: Optional[str] = None, verbose: bool = True) -> s
     r.resolution_x = config.RENDER_W
     r.resolution_y = config.RENDER_H
     r.resolution_percentage = 100
+    r.pixel_aspect_x = 1.0
+    r.pixel_aspect_y = 1.0
+    r.use_border = False
+    r.use_crop_to_border = False
     r.image_settings.file_format = "PNG"
     scene.view_settings.view_transform = config.VIEW_TRANSFORM
 

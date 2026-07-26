@@ -3,16 +3,15 @@ Occlusion-aware label bound computation (bpy-FREE, Docker-testable). SECOND PASS
 
 First pass (labeltools.frustum) gives each card the outline of its VISIBLE (in-frustum)
 region. This module runs AFTER that: given a card's 4 projected corners and a list of
-OCCLUDER RECTANGLES (other cards' physical extents projected to 2D, each with a camera
-depth), it carves the parts of the card's bound that are hidden by a nearer rectangle
+OCCLUDER RECTANGLES (other cards' transformed card extents projected to 2D, each with
+a camera depth), it carves the parts of the card's bound hidden by a nearer rectangle
 that covers > `area_frac` (default 25%) of the card's CURRENT bound. The result may be
-CONCAVE and a bound may be carved by several occluders in turn.
+CONCAVE and a bound may be carved by several occluders in turn. If the union of all
+nearer occluders covers more than 80% of the original in-frustum bound, the card is
+omitted from the labels.
 
-Occluder rectangles (built on the Blender side, see blender.labeling):
-  - bare card   -> the card rectangle
-  - sleeved     -> the sleeve's outer rectangle
-  - toploader   -> TWO rectangles (front + back plastic layer)
-  - slab        -> TWO rectangles (front + back face)
+Occluder rectangles are built from each embedded card's transform on the Blender side,
+so offsets and rotations inside transparent protection are preserved.
 
 Output vertices are tagged with a flag (see FLAG_*):
   1=TL corner, 2=TR corner, 3=BL corner, 4=BR corner, 5=a NON-corner bound point
@@ -49,6 +48,8 @@ FLAG_CREATED = 5
 # Clockwise perimeter rank of each KEYPOINT_ORDER index (TL,TR,BR,BL already CW).
 _PERIM_RANK = {0: 0, 1: 1, 2: 2, 3: 3}
 _MATCH_TOL = 1e-6
+MAX_OCCLUDED_FRAC = 0.80
+_AREA_TOL = 1e-9
 
 
 def require_shapely() -> None:
@@ -110,15 +111,16 @@ def _largest_ring(geom) -> Optional[List[Pt]]:
 
 
 def _occlude_shapely(card_quad: List[Pt], occluders: Sequence[Tuple[List[Pt], float]],
-                     card_depth: float, area_frac: float) -> Optional[List[Pt]]:
+                      card_depth: float, area_frac: float) -> Tuple[Optional[List[Pt]], bool]:
     """Clip the card quad to the frustum, then carve nearer occluders covering >
-    area_frac of the current bound. Returns the exterior ring, or None if nothing
-    visible remains."""
+    area_frac of the current bound. Returns (exterior ring, mostly_occluded)."""
     frustum = Polygon([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)])
     bound = Polygon(card_quad).buffer(0)         # buffer(0) fixes tiny self-touching
     bound = bound.intersection(frustum)
     if bound.is_empty or bound.area <= 0:
-        return None
+        return None, False
+    original_bound = bound
+    covered = None
     # Nearer occluders first (a closer rectangle carves before a farther one).
     for quad, depth in sorted(occluders, key=lambda o: o[1]):
         if depth >= card_depth - 1e-9:            # not in front of this card
@@ -128,10 +130,17 @@ def _occlude_shapely(card_quad: List[Pt], occluders: Sequence[Tuple[List[Pt], fl
         occ = Polygon(quad).buffer(0)
         if occ.is_empty:
             continue
+        covered_piece = original_bound.intersection(occ)
+        if not covered_piece.is_empty:
+            covered = covered_piece if covered is None else covered.union(covered_piece)
         inter = bound.intersection(occ)
         if inter.area > area_frac * bound.area:
             bound = bound.difference(occ)
-    return _largest_ring(bound)
+    occluded_area = 0.0 if covered is None else covered.area
+    occluded_frac = occluded_area / original_bound.area
+    if occluded_frac > MAX_OCCLUDED_FRAC + _AREA_TOL:
+        return None, True
+    return _largest_ring(bound), False
 
 
 def _tag_and_order(ring: Sequence[Pt], ndc_corners: Sequence[Ndc]) -> List[TaggedPt]:
@@ -183,7 +192,7 @@ def compute_bound(
 
     Returns (tagged_points | None, class_id, reason). class_id is 0 'card' (all 4
     corners in frustum) or 1 'partial_card' (some out). reason ∈
-    {'labeled','labeled-partial','back-facing','fully-out-of-frustum'}.
+    {'labeled','labeled-partial','back-facing','fully-out-of-frustum','mostly-occluded'}.
     `occluders` are (quad_xy, depth) in the SAME 2D (Blender-NDC) space as the card
     corners; only those nearer than `card_depth` and covering > area_frac carve.
     """
@@ -198,8 +207,10 @@ def compute_bound(
     require_shapely()
     card_2d = [(x, y) for (x, y, _z) in ndc_corners]
     cd = card_depth if card_depth is not None else float("inf")
-    ring = _occlude_shapely(card_2d, occluders, cd, area_frac)
+    ring, mostly_occluded = _occlude_shapely(card_2d, occluders, cd, area_frac)
 
+    if mostly_occluded:
+        return None, class_id, "mostly-occluded"
     if not ring or len(ring) < 3:
         return None, class_id, "fully-out-of-frustum"
     tagged = _tag_and_order(ring, ndc_corners)

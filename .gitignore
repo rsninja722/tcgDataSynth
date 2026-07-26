@@ -1,6 +1,8 @@
 /out/
 __pycache__/
 *.py[cod]
+*/__pycache__/
+*.pyc
 *$py.class
 .pytest_cache/
 .coverage

@@ -69,10 +69,16 @@ The next user verification is:
 "C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" -b -P tests\t12_display_case.py
 ```
 
-Then visualize each emitted pair, for example:
+Then visualize all emitted pairs:
 
 ```bash
-python3 labeltools/visualize.py out/t12_case_toploader_flat_5x5_in.png out/t12_case_toploader_flat_5x5_in.txt
+.venv/bin/python labeltools/visualize_all.py
+```
+
+To visualize one pair instead:
+
+```bash
+.venv/bin/python labeltools/visualize.py out/t12_case_toploader_flat_5x5_in.png out/t12_case_toploader_flat_5x5_in.txt
 ```
 
 Report the Blender console output and attach the `*_viz.png` files. Expected details are in the test script header and `PROJECT_STATUS.md`.
