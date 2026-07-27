@@ -47,6 +47,16 @@ def test_determinism_same_seed_same_config():
     assert c.to_json() != a.to_json()  # different seed => (almost surely) different
 
 
+def test_caller_rng_can_continue_from_rules_sampling():
+    import numpy as np
+    first_rng = np.random.default_rng(4242)
+    second_rng = np.random.default_rng(4242)
+    first = C.sample_scene_config(None, 4242, rng=first_rng)
+    second = C.sample_scene_config(None, 4242, rng=second_rng)
+    assert first.to_json() == second.to_json()
+    assert first_rng.integers(0, 2 ** 31) == second_rng.integers(0, 2 ** 31)
+
+
 def test_json_serializable():
     cfg = C.sample_scene_config(None, 7)
     s = json.dumps(cfg.to_dict())  # must not raise

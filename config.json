@@ -1,5 +1,6 @@
 {
   "_comment": "Central tuning config for tcgDataSynth. Edit and re-run; scripts read this at runtime. Each scene type has its OWN params under 'layouts'.",
+  "blender_executable": "C:\\Program Files\\Blender Foundation\\Blender 5.0\\blender.exe",
   "holo": {
     "_comment": "Holo diffraction-flash. angle_gain: flash-band motion vs view angle. pattern_gain: spatial break-up. sharpness: flash threshold. emit: peak flash brightness. darken: base darkening between flashes.",
     "angle_gain": 12.0,
@@ -12,39 +13,151 @@
     "_comment": "Each effect is independently sampled. probability is its per-image enable chance; every *_range is [minimum, maximum].",
     "sensor_noise": {
       "probability": 0.45,
-      "luma_sigma_range": [0.002, 0.012],
-      "chroma_sigma_range": [0.002, 0.03]
+      "luma_sigma_range": [
+        0.002,
+        0.012
+      ],
+      "chroma_sigma_range": [
+        0.002,
+        0.03
+      ]
     },
     "compression": {
       "probability": 0.4,
-      "jpeg_quality_range": [25, 70],
-      "cycles_range": [1, 3]
+      "jpeg_quality_range": [
+        25,
+        70
+      ],
+      "cycles_range": [
+        1,
+        3
+      ]
     },
     "pixel_melt": {
       "probability": 0.35,
-      "blur_sigma_range": [0.35, 1.15],
-      "scale_range": [0.55, 0.85]
+      "blur_sigma_range": [
+        0.35,
+        1.15
+      ],
+      "scale_range": [
+        0.55,
+        0.85
+      ]
     },
     "white_balance": {
       "probability": 0.4,
-      "temperature_shift_k_range": [-450.0, 450.0]
+      "temperature_shift_k_range": [
+        -450.0,
+        450.0
+      ]
     },
     "tint": {
       "probability": 0.35,
-      "green_magenta_shift_range": [-0.04, 0.04]
+      "green_magenta_shift_range": [
+        -0.04,
+        0.04
+      ]
     },
     "chromatic_aberration": {
       "probability": 0.3,
-      "shift_px_range": [0.25, 1.5]
+      "shift_px_range": [
+        0.25,
+        1.5
+      ]
     },
     "contrast": {
       "probability": 0.4,
-      "reduction_range": [0.0, 0.5]
+      "reduction_range": [
+        0.0,
+        0.5
+      ]
     },
     "haze": {
       "probability": 0.3,
-      "strength_range": [0.02, 0.18],
-      "brightness_range": [0.75, 1.0]
+      "strength_range": [
+        0.02,
+        0.18
+      ],
+      "brightness_range": [
+        0.75,
+        1.0
+      ]
+    }
+  },
+  "generation": {
+    "count": 3,
+    "base_seed": 20260731,
+    "enabled_options": {
+      "layouts": [
+        "table",
+        "floating",
+        "binder",
+        "display_case",
+        "hand"
+      ],
+      "protections": [
+        "none",
+        "sleeve",
+        "semi_rigid",
+        "toploader",
+        "slab"
+      ],
+      "sleeve_types": [
+        "clear",
+        "opaque_back"
+      ],
+      "sleeve_sizes": [
+        "1mm",
+        "2.5mm"
+      ],
+      "finishes": [
+        "normal",
+        "holo"
+      ],
+      "holo_regions": [
+        "entire",
+        "picture",
+        "reverse"
+      ],
+      "holo_patterns": [
+        "none",
+        "cosmos",
+        "horizontal_lines",
+        "water_web"
+      ],
+      "physical_texture": true,
+      "damage": [
+        "dirt",
+        "scratches",
+        "surface"
+      ],
+      "binder_grids": [
+        "1x1",
+        "2x2",
+        "3x3",
+        "4x3"
+      ],
+      "binder_contents": [
+        "sleeved",
+        "toploader",
+        "slab"
+      ],
+      "lighting": {
+        "spotlight": true,
+        "point_lights": true,
+        "occluders": true
+      },
+      "post_effects": [
+        "sensor_noise",
+        "compression",
+        "pixel_melt",
+        "white_balance",
+        "tint",
+        "chromatic_aberration",
+        "contrast",
+        "haze"
+      ],
+      "back_to_camera_prob": 0.15
     }
   },
   "layouts": {

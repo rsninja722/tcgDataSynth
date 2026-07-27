@@ -99,6 +99,46 @@ def test_postfx_probabilities_and_ranges_are_normalized():
             == config.DEFAULT_CONFIG["postfx"]["contrast"]["reduction_range"]
 
 
+def test_generation_settings_are_validated_and_persisted():
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "config.json")
+        with open(p, "w") as fh:
+            json.dump({"keep": "this", "generation": {
+                "count": 3,
+                "base_seed": 99,
+                "enabled_options": {
+                    "layouts": ["hand", "bogus"],
+                    "protections": [],
+                    "lighting": {"spotlight": 0, "point_lights": 1},
+                    "back_to_camera_prob": 2.0,
+                },
+            }}, fh)
+        generation = config.load_generation_settings(p)
+        assert generation["count"] == 3 and generation["base_seed"] == 99
+        assert generation["enabled_options"]["layouts"] == ["hand"]
+        assert generation["enabled_options"]["protections"] == []
+        assert generation["enabled_options"]["lighting"] == {
+            "spotlight": False, "point_lights": True, "occluders": True}
+        assert generation["enabled_options"]["back_to_camera_prob"] == 1.0
+
+        config.save_generation_settings(generation, p)
+        with open(p) as fh:
+            saved = json.load(fh)
+        assert saved["keep"] == "this"
+        assert config.load_generation_settings(p) == generation
+
+
+def test_blender_executable_is_persisted_separately_from_generation_settings():
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "config.json")
+        config.save_generation_settings({"count": 2, "base_seed": 50,
+                                         "enabled_options": {}}, p)
+        executable = r"D:\Apps\Blender\blender.exe"
+        config.save_blender_executable(executable, p)
+        assert config.load_blender_executable(p) == executable
+        assert config.load_generation_settings(p)["count"] == 2
+
+
 def _run_all():
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

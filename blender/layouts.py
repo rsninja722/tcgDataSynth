@@ -382,7 +382,7 @@ def build_floating(scene_cfg, card_lib, cache_dir: str, rng,
 _CASE_HEADROOM = 0.040   # cover sits 40mm above the top of the tallest (rotated) item
 
 
-def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
+def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, enabled_options=None, **_ignored):
     """Display case: cards in a tight aligned grid on a random-material base with
     four side walls (same material) rising to a scratched/smudged 6mm acrylic cover
     that clears the tallest item by _CASE_HEADROOM (40mm); cards all flat or all
@@ -487,7 +487,7 @@ def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
     # CENTER can be anywhere within the top face of the case, so it may hang partly off
     # an edge but is always on the display.
     if float(rng.random()) < float(p.get("top_card_probability", 0.20)):
-        top_cfg = C.sample_top_card(rng)
+        top_cfg = C.sample_top_card(rng, enabled_options)
         ht_t = sb.protection_half_thickness(top_cfg.protection)
         inst = sb.build_card_instance("TopCard", top_cfg, card_lib.select(rng), cache_dir, rng)
         inst.root.location = (float(rng.uniform(-case_w / 2.0, case_w / 2.0)),

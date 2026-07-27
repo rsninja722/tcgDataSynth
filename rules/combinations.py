@@ -621,14 +621,16 @@ def _sample_postfx(rng, opts, tuning: Dict[str, Any]) -> PostFxConfig:
 # Entry point + validation
 # --------------------------------------------------------------------------- #
 def sample_scene_config(enabled_options: Optional[Dict[str, Any]], rng_seed: int,
-                        max_cards: Optional[int] = None, config_path: Optional[str] = None) -> SceneConfig:
+                        max_cards: Optional[int] = None, config_path: Optional[str] = None,
+                        rng: Optional[np.random.Generator] = None) -> SceneConfig:
     """Sample ONE validated scene config from a seed. Deterministic per seed.
     `max_cards` (if given) caps the number of cards in the scene. `config_path`
-    selects the runtime config.json used for post-effect tuning."""
+    selects the runtime config.json used for post-effect tuning. Pass ``rng`` to
+    continue the same scene generator into downstream Blender construction."""
     if max_cards is not None and int(max_cards) < 1:
         raise ConfigError("max_cards must be at least 1.")
     opts = _resolve(enabled_options)
-    rng = np.random.default_rng(rng_seed)
+    rng = np.random.default_rng(rng_seed) if rng is None else rng
     layout, cards = _sample_layout_and_cards(rng, opts)
     if max_cards is not None and len(cards) > max_cards:
         cards = cards[:int(max_cards)]

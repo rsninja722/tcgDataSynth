@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import math
+import json
 from dataclasses import dataclass, field
 from typing import Tuple
 
@@ -148,6 +149,7 @@ OUTPUT = OutputLayout()
 # --------------------------------------------------------------------------- #
 CONFIG_FILENAME = "config.json"
 DEFAULT_CONFIG = {
+    "blender_executable": r"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe",
     "holo": {
         "angle_gain": 12.0,    # flash-band motion speed vs view angle
         "pattern_gain": 4.0,   # spatial break-up of the flash phase by the pattern
@@ -195,6 +197,29 @@ DEFAULT_CONFIG = {
             "brightness_range": [0.75, 1.0],
         },
     },
+    # Persisted by the Phase 7 add-on. These keys map directly to
+    # rules.combinations.default_enabled_options() without importing that module.
+    "generation": {
+        "count": 10,
+        "base_seed": 20260731,
+        "enabled_options": {
+            "layouts": ["table", "floating", "binder", "display_case", "hand"],
+            "protections": ["none", "sleeve", "semi_rigid", "toploader", "slab"],
+            "sleeve_types": ["clear", "opaque_back"],
+            "sleeve_sizes": ["1mm", "2.5mm"],
+            "finishes": ["normal", "holo"],
+            "holo_regions": ["entire", "picture", "reverse"],
+            "holo_patterns": ["none", "cosmos", "horizontal_lines", "water_web"],
+            "physical_texture": True,
+            "damage": ["dirt", "scratches", "surface"],
+            "binder_grids": ["1x1", "2x2", "3x3", "4x3"],
+            "binder_contents": ["sleeved", "toploader", "slab"],
+            "lighting": {"spotlight": True, "point_lights": True, "occluders": True},
+            "post_effects": ["sensor_noise", "compression", "pixel_melt", "white_balance",
+                             "tint", "chromatic_aberration", "contrast", "haze"],
+            "back_to_camera_prob": 0.15,
+        },
+    },
     # Per-layout scene params (each scene type has its OWN set). Add entries here as
     # layouts are built (out_of_frustum: 'keep' = render but don't label | 'remove').
     "layouts": {
@@ -223,6 +248,7 @@ _POSTFX_RANGE_BOUNDS = {
     ("haze", "strength_range"): (0.0, 1.0),
     ("haze", "brightness_range"): (0.0, 1.0),
 }
+GENERATION_SEED_MAX = 2 ** 63 - 1
 
 
 def _valid_number(value) -> bool:
@@ -266,6 +292,45 @@ def _validated_postfx_tuning(tuning: dict) -> dict:
     return out
 
 
+def _validated_generation(settings: dict) -> dict:
+    """Return safe persisted GUI settings while preserving deliberate empty toggles."""
+    defaults = DEFAULT_CONFIG["generation"]
+    settings = settings if isinstance(settings, dict) else {}
+    out = {}
+    for key in ("count", "base_seed"):
+        value = settings.get(key, defaults[key])
+        if not isinstance(value, int) or isinstance(value, bool):
+            value = defaults[key]
+        out[key] = int(value)
+    if not 1 <= out["count"] <= GENERATION_SEED_MAX:
+        out["count"] = defaults["count"]
+    if not 0 <= out["base_seed"] <= GENERATION_SEED_MAX - out["count"]:
+        out["base_seed"] = defaults["base_seed"]
+
+    supplied = settings.get("enabled_options", {})
+    supplied = supplied if isinstance(supplied, dict) else {}
+    option_defaults = defaults["enabled_options"]
+    options = {}
+    for key, allowed in option_defaults.items():
+        value = supplied.get(key, allowed)
+        if isinstance(allowed, list):
+            if not isinstance(value, list):
+                value = allowed
+            options[key] = [item for item in allowed if item in value]
+        elif isinstance(allowed, dict):
+            value = value if isinstance(value, dict) else {}
+            options[key] = {name: bool(value.get(name, default))
+                            for name, default in allowed.items()}
+        elif isinstance(allowed, bool):
+            options[key] = bool(value)
+        else:
+            if not _valid_number(value):
+                value = allowed
+            options[key] = min(1.0, max(0.0, float(value)))
+    out["enabled_options"] = options
+    return out
+
+
 def _coerce(default_val, new):
     if isinstance(default_val, bool):
         return bool(new)
@@ -297,7 +362,6 @@ def _deep_merge(defaults: dict, raw) -> dict:
 def load_config(path: str = None) -> dict:
     """Full config (JSON deep-merged over DEFAULT_CONFIG, type-coerced). A bad edit
     never crashes a render."""
-    import json
     if path is None:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME)
     raw = {}
@@ -309,6 +373,7 @@ def load_config(path: str = None) -> dict:
             raw = {}
     cfg = _deep_merge(DEFAULT_CONFIG, raw)
     cfg["postfx"] = _validated_postfx_tuning(cfg["postfx"])
+    cfg["generation"] = _validated_generation(cfg["generation"])
     for lp in cfg.get("layouts", {}).values():   # validate enums
         if lp.get("out_of_frustum") not in _OUT_OF_FRUSTUM_CHOICES:
             lp["out_of_frustum"] = "keep"
@@ -328,3 +393,55 @@ def load_layout_params(layout: str, path: str = None) -> dict:
 def load_postfx_tuning(path: str = None) -> dict:
     """Validated post-effect probabilities and sampled-value ranges."""
     return load_config(path)["postfx"]
+
+
+def load_generation_settings(path: str = None) -> dict:
+    """Validated persisted Phase 7 GUI settings."""
+    return load_config(path)["generation"]
+
+
+def load_blender_executable(path: str = None) -> str:
+    """Configured Blender executable for the standalone Phase 7 GUI."""
+    return str(load_config(path)["blender_executable"])
+
+
+def _read_raw_config(path: str) -> dict:
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                raw = json.load(handle)
+            if isinstance(raw, dict):
+                return raw
+        except Exception:  # noqa: BLE001
+            pass
+    return {}
+
+
+def _write_raw_config(path: str, raw: dict) -> None:
+    parent = os.path.dirname(os.path.abspath(path))
+    os.makedirs(parent, exist_ok=True)
+    staged = path + ".generation.tmp"
+    with open(staged, "w", encoding="utf-8") as handle:
+        json.dump(raw, handle, indent=2)
+        handle.write("\n")
+    os.replace(staged, path)
+
+
+def save_generation_settings(settings: dict, path: str = None) -> None:
+    """Atomically persist the GUI's generation controls without rewriting other config."""
+    if path is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME)
+    raw = _read_raw_config(path)
+    raw["generation"] = _validated_generation(settings)
+    _write_raw_config(path, raw)
+
+
+def save_blender_executable(executable: str, path: str = None) -> None:
+    """Atomically persist the standalone GUI's Blender executable path."""
+    if path is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME)
+    if not isinstance(executable, str) or not executable.strip():
+        raise ValueError("Blender executable path must be a non-empty string")
+    raw = _read_raw_config(path)
+    raw["blender_executable"] = executable.strip()
+    _write_raw_config(path, raw)

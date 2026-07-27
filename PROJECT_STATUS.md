@@ -4,10 +4,16 @@ Last consolidated: 2026-07-27.
 
 ## Active Checkpoint
 
-Phase 6 is complete. The post-effect review and Blender 5.0 output-transaction
-acceptance both passed. Phase 7 has not started.
+Phase 7, standalone GUI and orchestration. The active goal is a desktop Python GUI
+that persists option toggles, launches one headless Blender worker per pair, writes a
+contiguous seed manifest, and safely pauses/resumes only between completed pairs.
 
-The next checkpoint will be defined when Phase 7 GUI/orchestration planning begins.
+Acceptance focus:
+
+- Verify `tests/t20_standalone_generation.py` completes one isolated worker pair under
+  Blender 5.0.0.
+- Interactively verify `gui.py` Start, Pause during rendering, Resume, and contiguous
+  `out/images`, `out/labels`, and `out/manifest.jsonl` records with a small run.
 
 ## Phase Progress
 
@@ -20,7 +26,8 @@ The next checkpoint will be defined when Phase 7 GUI/orchestration planning begi
 - Phase 6: complete. All eight configurable image-space effects passed review, and the
   `t19` Blender 5.0 output-transaction acceptance passed with aligned labels and no
   staged-output leftovers.
-- Phase 7: modal-timer GUI/orchestration not started.
+- Phase 7: standalone GUI/worker orchestration implementation and Docker validation
+  complete; Blender worker plus interactive Start-Pause-Resume acceptance pending.
 - Phase 8: throughput comparison and 50-image pilot not started.
 
 ## Locked Decisions
@@ -30,7 +37,8 @@ The next checkpoint will be defined when Phase 7 GUI/orchestration planning begi
 - Runtime dependencies in Blender: OpenCV headless and Shapely.
 - Primary renderer: Cycles with GPU/CUDA, 128 samples, denoising. EEVEE is comparison-only.
 - Color management: AgX.
-- Orchestration: modal timer, one completed scene per tick. Pause finishes the current image/label pair before stopping.
+- Orchestration: standalone Tkinter GUI launches one headless Blender worker per pair.
+  Pause lets the active worker finish and publish its image/label pair before stopping.
 - Card image root: configurable with `TCG_CARD_IMAGE_ROOT`; current user default remains in `config.py`.
 - Card back: `back.png` in the image root.
 - Picture region: project default unless `picture_regions.json` provides a per-card override.
@@ -93,4 +101,6 @@ This is a project blocker before Phase 8: the custom format cannot be passed dir
 
 ## Next Goals
 
-1. Await Phase 7 GUI/orchestration planning direction.
+1. Complete the Phase 7 Docker tests and Blender `t20` registration/interactive
+   Start-Pause-Resume acceptance.
+2. Mark Phase 7 complete after the small-run image/label/manifest continuity report.

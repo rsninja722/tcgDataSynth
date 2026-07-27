@@ -6,8 +6,8 @@ Blender 5.0 synthetic-scene generator for training trading-card detectors. It bu
 
 Phases 0-4 are implemented and accepted, including table, floating, binder,
 display-case, and hand layouts with occlusion-aware labels. Phase 5 camera, lighting,
-and non-sun simplex shadow masks are accepted. Phase 6 post effects is complete; Phases
-7-8 are not implemented.
+and non-sun simplex shadow masks are accepted. Phase 6 post effects is complete; Phase
+7 standalone GUI/orchestration is active and Phase 8 is not implemented.
 
 See `PROJECT_STATUS.md` for the active checkpoint, validated decisions, and next work. See `LABEL_FORMAT.md` before consuming labels.
 
@@ -70,6 +70,20 @@ optional diagnostic override for another compatible library.
 The compact hand library passed `tests/t15_hand_asset_bundle.py` under Blender 5.0.0
 and the five integrated `tests/t14_hand.py` cases passed from the bundled default.
 Rebuild and validation instructions are in `assets/HAND_RIG.md`.
+
+## Standalone GUI
+
+Set `blender_executable` in `config.json` to the Blender 5.0 executable, then run the
+desktop GUI with a normal Python installation:
+
+```bash
+python gui.py
+```
+
+The GUI persists its count, base seed, and option toggles to `config.json`. It launches
+one headless Blender worker per pair, so Pause waits for the active pair to be published
+and prevents any later worker from starting. Completed pairs are in `out/images` and
+`out/labels`; `out/manifest.jsonl` makes resume numbering deterministic and gap-safe.
 
 ## Next Phase
 
