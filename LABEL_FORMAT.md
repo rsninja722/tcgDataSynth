@@ -26,6 +26,9 @@ A front-facing card is omitted entirely when nearer cards cover more than 80% of
 original in-frustum projected area. Transparent protection does not count as an opaque
 occluder; occlusion follows the embedded card's offset and rotation.
 
+Hands are deliberately excluded from occlusion calculations. A hand-held card retains
+its original frustum-clipped label even where fingers cover part of the rendered card.
+
 Point flags:
 
 - `1`: original top-left card corner.

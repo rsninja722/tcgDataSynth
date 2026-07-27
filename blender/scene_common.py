@@ -21,8 +21,9 @@ def reset_scene():
     """Delete all objects and purge orphaned datablocks (idempotent per case)."""
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete(use_global=False)
-    for coll in (bpy.data.meshes, bpy.data.materials, bpy.data.lights,
-                 bpy.data.cameras, bpy.data.images):
+    for coll in (bpy.data.meshes, bpy.data.armatures, bpy.data.materials,
+                 bpy.data.lights, bpy.data.cameras, bpy.data.curves,
+                 bpy.data.images):
         for block in list(coll):
             if block.users == 0:
                 coll.remove(block)

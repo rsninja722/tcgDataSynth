@@ -21,6 +21,19 @@ from typing import Tuple
 # the TCG_CARD_IMAGE_ROOT env var when running elsewhere.
 DEFAULT_CARD_IMAGE_ROOT = r"C:\Code\React\CollectiblesApp\src\ai_dev\datasets\pokemon\data\images"
 
+# CC0 left/right rigged hand source used by the Phase 4 hand layout. Keep the
+# binary outside Git; the known Windows location is the default and
+# TCG_HAND_ASSET remains a portable override.
+HAND_ASSET_FILENAME = "Hands + armature.blend"
+DEFAULT_HAND_ASSET_PATH = (
+    r"C:\Code\docker\opencode-secure-docker\inputs\Hands + armature.blend"
+)
+
+
+def hand_asset_path() -> str:
+    """Resolved hand .blend path: env override wins, else the known Windows path."""
+    return os.environ.get("TCG_HAND_ASSET", DEFAULT_HAND_ASSET_PATH)
+
 # Image extensions treated as card faces during recursive discovery.
 CARD_IMAGE_EXTS: Tuple[str, ...] = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")
 
@@ -150,6 +163,7 @@ DEFAULT_CONFIG = {
                      "out_of_frustum": "keep"},
         "binder": {"max_cards": 12, "out_of_frustum": "keep"},
         "display_case": {"max_cards": 24, "out_of_frustum": "keep"},
+        "hand": {"max_cards": 1, "out_of_frustum": "keep"},
     },
 }
 # Back-compat alias (used by tests / older references).

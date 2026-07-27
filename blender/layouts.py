@@ -17,6 +17,7 @@ import bmesh
 
 from blender import scene_builder as sb
 from blender import protection as prot
+from blender import hand as hand_asset
 from labeltools.refraction import (BOUNDS_MAX_PROPERTY, BOUNDS_MIN_PROPERTY,
                                    IOR_PROPERTY)
 from rules import combinations as C
@@ -503,3 +504,40 @@ def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
 
     extent = max(grid_w, grid_h) + 0.05
     return instances, extent
+
+
+# --------------------------------------------------------------------------- #
+# Hand (spec section 3.5.4): one front-facing bare/sleeved/toploadered card held
+# in a side or pinch grip above the same noisy table used by other Phase 4 scenes.
+# --------------------------------------------------------------------------- #
+def build_hand(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
+    """Build one card and a seeded left/right hand grip.
+
+    Returns ``(instances, frame_extent_m)``. Hands are deliberately not label
+    occluders: hand-held cards retain their original four-corner labels.
+    """
+    params = scene_cfg.layout.params
+    card_cfg = scene_cfg.cards[0]
+
+    table = build_background(rng)
+    table.name = "HandTable"
+    table.location.z = -0.12
+    table.data.materials[0].name = "HandTableMat"
+
+    instance = sb.build_card_instance(
+        "Card0", card_cfg, card_lib.select(rng), cache_dir, rng)
+    instance.root.location = (0.0, 0.0, 0.0)
+    instance.root.rotation_euler = (0.0, 0.0, 0.0)
+
+    hand_asset.build_hand(
+        "GripHand",
+        params["handedness"],
+        params["grip"],
+        sb.protection_footprint(card_cfg.protection),
+        float(params["approach_deg"]),
+        float(params["depth"]),
+        protection_half_thickness=sb.protection_half_thickness(card_cfg.protection),
+        card_z=0.0,
+        rng=rng,
+    )
+    return [instance], 0.30

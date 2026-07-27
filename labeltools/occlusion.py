@@ -4,8 +4,8 @@ Occlusion-aware label bound computation (bpy-FREE, Docker-testable). SECOND PASS
 First pass (labeltools.frustum) gives each card the outline of its VISIBLE (in-frustum)
 region. This module runs AFTER that: given a card's 4 projected corners and a list of
 OCCLUDER RECTANGLES (other cards' transformed card extents projected to 2D, each with
-a camera depth), it carves the parts of the card's bound hidden by a nearer rectangle
-that covers > `area_frac` (default 25%) of the card's CURRENT bound. The result may be
+a camera depth), it carves the parts hidden by nearer rectangles that cover >
+`area_frac` (default 25%) of the current bound. The result may be
 CONCAVE and a bound may be carved by several occluders in turn. If the union of all
 nearer occluders covers more than 80% of the original in-frustum bound, the card is
 omitted from the labels.
@@ -136,6 +136,7 @@ def _occlude_shapely(card_quad: List[Pt], occluders: Sequence[Tuple[List[Pt], fl
         inter = bound.intersection(occ)
         if inter.area > area_frac * bound.area:
             bound = bound.difference(occ)
+
     occluded_area = 0.0 if covered is None else covered.area
     occluded_frac = occluded_area / original_bound.area
     if occluded_frac > MAX_OCCLUDED_FRAC + _AREA_TOL:

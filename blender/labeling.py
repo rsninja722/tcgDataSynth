@@ -138,7 +138,8 @@ def label_scene(scene, cam, instances, area_frac: float = 0.25):
 
     Returns a list of (instance, PolyLabel|None, reason). Each card's visible-region
     bound is carved by every OTHER card's nearer rectangle(s) that cover > area_frac
-    of its current bound. Shapely is mandatory; missing it is a setup error.
+    of its current bound. Non-card scene geometry is not an occluder. Shapely is
+    mandatory; missing it is a setup error.
     """
     require_shapely()
     boxes = _refractive_boxes(scene)
@@ -163,8 +164,9 @@ def label_scene(scene, cam, instances, area_frac: float = 0.25):
     for i, inst in enumerate(instances):
         ndc, fv, depth = projected[i]
         occluders = [q for j, ql in enumerate(occ_quads) if j != i for q in ql]
-        pts, cls, reason = compute_bound(inst.card_id, ndc, fv, occluders=occluders,
-                                         card_depth=depth, area_frac=area_frac)
+        pts, cls, reason = compute_bound(
+            inst.card_id, ndc, fv, occluders=occluders,
+            card_depth=depth, area_frac=area_frac)
         label = None
         if pts:
             label = PolyLabel(inst.card_id, tuple(pts), holo_tag=inst.holo_tag, class_id=cls)

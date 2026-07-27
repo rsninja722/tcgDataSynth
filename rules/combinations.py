@@ -34,6 +34,8 @@ POST_EFFECTS = ("sensor_noise", "compression", "pixel_melt", "white_balance", "t
 BINDER_GRIDS = ("1x1", "2x2", "3x3", "4x3")
 BINDER_CONTENTS = ("sleeved", "toploader", "slab")  # what the binder is sized for
 HAND_GRIPS = ("side", "pinch")
+HAND_SIDES = ("left", "right")
+HAND_DEPTH_RANGE = (0.1, 0.34)  # deeper contacts clipped into the card during t14 review
 DISPLAY_CASE_MAX_CARDS = 24   # cap on the display-case grid (user)
 # A decorative card may rest ON TOP of a display case; it can be any of these
 # (NOT semi-rigid), independent of the grid's toploader/slab restriction (user).
@@ -383,8 +385,14 @@ def _hand(rng, opts):
     else:
         grip = _choice(rng, HAND_GRIPS)
     card = _make_card(rng, opts, 0, protection_kind, allow_back=False)
-    params = {"grip": grip, "approach_deg": float(rng.uniform(0.0, 360.0)),
-              "depth": float(rng.uniform(0.1, 0.6))}
+    params = {
+        "grip": grip,
+        "handedness": _choice(rng, HAND_SIDES),
+        "approach_deg": float(rng.uniform(0.0, 360.0)),
+        # Fraction controlling how far the contact point moves inward from the
+        # protection boundary. This is dimensionless, not a world-space distance.
+        "depth": float(rng.uniform(*HAND_DEPTH_RANGE)),
+    }
     return LayoutConfig("hand", params), [card]
 
 
@@ -531,7 +539,19 @@ def validate_scene_config(cfg: SceneConfig) -> None:
             f"display_case has {len(cfg.cards)} cards (max {DISPLAY_CASE_MAX_CARDS})"
     elif lk == "hand":
         assert kinds <= {"none", "sleeve", "toploader"}, f"hand has {kinds}"
-        assert cfg.layout.params.get("grip") in HAND_GRIPS
+        assert len(cfg.cards) == 1, "hand layout requires exactly one card"
+        assert not cfg.cards[0].back_to_camera, "hand card must face the camera"
+        grip = cfg.layout.params.get("grip")
+        assert grip in HAND_GRIPS
+        assert cfg.layout.params.get("handedness") in HAND_SIDES
+        if cfg.cards[0].protection.kind == "none":
+            assert grip == "pinch", "bare hand-held cards require a pinch grip"
+        if grip == "side":
+            assert cfg.cards[0].protection.kind in {"sleeve", "toploader"}
+        approach = float(cfg.layout.params.get("approach_deg", -1.0))
+        depth = float(cfg.layout.params.get("depth", -1.0))
+        assert 0.0 <= approach < 360.0
+        assert HAND_DEPTH_RANGE[0] <= depth <= HAND_DEPTH_RANGE[1]
     elif lk == "binder":
         content = cfg.layout.params["content_type"]
         expected = _BINDER_CONTENT_PROTECTION[content]

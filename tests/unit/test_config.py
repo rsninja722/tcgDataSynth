@@ -19,10 +19,27 @@ def test_project_config_json_loads():
     assert set(cfg["holo"]) == set(config.DEFAULT_CONFIG["holo"])
     # per-layout sections
     assert "table" in cfg["layouts"] and "floating" in cfg["layouts"]
+    assert config.load_layout_params("hand")["max_cards"] == 1
     assert "max_shapes" in config.load_layout_params("floating")
     assert config.load_holo_tuning()["angle_gain"] == cfg["holo"]["angle_gain"]
     assert config.load_layout_params("table")["max_cards"] == cfg["layouts"]["table"]["max_cards"]
     assert config.load_layout_params("nonexistent") == {}
+
+
+def test_hand_asset_path_default_and_env_override():
+    old = os.environ.get("TCG_HAND_ASSET")
+    try:
+        os.environ.pop("TCG_HAND_ASSET", None)
+        assert config.hand_asset_path().replace("\\", "/").endswith(
+            "/" + config.HAND_ASSET_FILENAME)
+        override = os.path.join("custom", "hand.blend")
+        os.environ["TCG_HAND_ASSET"] = override
+        assert config.hand_asset_path() == override
+    finally:
+        if old is None:
+            os.environ.pop("TCG_HAND_ASSET", None)
+        else:
+            os.environ["TCG_HAND_ASSET"] = old
 
 
 def test_type_coercion_and_partial_merge():

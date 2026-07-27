@@ -4,21 +4,19 @@ Last consolidated: 2026-07-26.
 
 ## Active Checkpoint
 
-Phase 4, display-case acceptance. Run `tests/t12_display_case.py` in Blender 5.0 and review its console output plus all visualized renders.
+Phase 4, integrated hand acceptance. Run `tests/t14_hand.py` in Blender 5.0, visualize
+all five image/label pairs, and review grip contact plus original card polygons.
 
 Acceptance focus:
 
-- Coplanar grid cards do not occlude one another.
-- A nearer top card or overlapping card carves the farther card's polygon.
-- Cards with more than 80% of their in-frustum area occluded are not labeled.
-- Created polygon vertices are magenta in the visualizer.
-- Full and partial frustum bounds align with the rendered cards.
-- Grid bounds follow the apparent card corners after lid/slab refraction; the card on
-  top of the lid remains directly projected unless it is itself slabbed.
-- Every t12 scene has a top card resting flat on the acrylic lid.
-- The table backdrop fills the area below the case.
-
-Do not start the hand layout until this checkpoint is reviewed with the user.
+- Pinch grips place the thumb in front and index behind bare/sleeved/toploadered cards.
+- Side grips put thumb and fingers on opposite faces of sleeves/toploaders.
+- Left/right hands approach from the requested cardinal or diagonal side and vary
+  between shallow and normal contact. Depth is capped at 0.34 because deeper grips
+  clipped into cards during t14 review.
+- The reused noisy table fills the background and skin tones remain plausible.
+- Every fully in-frame hand-held card retains flags 1,2,4,3. Hands and transparent
+  protection do not carve hand-scene labels.
 
 ## Phase Progress
 
@@ -26,7 +24,7 @@ Do not start the hand layout until this checkpoint is reviewed with the user.
 - Phase 1: bare card and fixed-corner projection validated.
 - Phase 2: protection assets implemented; sleeves and holders reviewed, slab review was waived after final connector changes.
 - Phase 3: finish, holo, physical-texture, and damage pipelines implemented and integrated.
-- Phase 4: table and floating reviewed; binder implemented; display case awaits current acceptance; hand not started.
+- Phase 4: table, floating, binder, and display case reviewed; integrated hand acceptance active.
 - Phase 5: lighting and camera randomization not started.
 - Phase 6: post effects not started.
 - Phase 7: modal-timer GUI/orchestration not started.
@@ -49,6 +47,9 @@ Do not start the hand layout until this checkpoint is reviewed with the user.
 - Damage variation is per instance, not cached solely by card ID.
 - Bulk acrylic label projection uses finite oriented boxes, nominal IOR 1.5, and the
   geometric-normal Snell ray as the apparent scattering centroid.
+- The supplied CC0 hand model was validated in Blender 5.0 and is resolved by
+  `TCG_HAND_ASSET` (with the user's known Windows path as a default).
+- Hands are render-only geometry for labels; they never act as card occluders.
 
 ## Active Label Contract
 
@@ -58,20 +59,23 @@ This is a project blocker before Phase 8: the custom format cannot be passed dir
 
 ## Known Risks
 
-- The bpy portion of occlusion-aware labeling has not yet been executed by the user.
-- The refractive label projection has pure-Python coverage but has not yet been
-  compared visually against Blender Cycles; t12 is the active acceptance path.
+- The display-case and occlusion-aware/refraction labeling checkpoint was accepted by
+  the user after Blender 5.0 visual testing.
+- The Blender 2.79 hand meshes, armatures, Multires, constraints, skin materials, and
+  control deformation were accepted after the t13 Blender 5.0 report/renders. The
+  t13 control-grid meshes were hidden by a diagnostic copy bug, now fixed; numeric
+  control response in the report confirmed all four finger chains.
 - Refraction intentionally ignores surface roughness, scratches, smudges, and normal
   maps. Intersecting/touching refractive boxes fail explicitly rather than using an
   incorrect nested-medium approximation.
-- Occlusion currently approximates each embedded card with a projected rectangle and mean depth. Intersecting or strongly tilted geometry may need a depth-aware method before the hand layout.
+- Card-card occlusion still uses projected rectangles and mean depth. Hand geometry is
+  intentionally excluded from occlusion calculations.
 - The single-ring custom format keeps one connected polygon and bridges holes; disconnected visible regions are not represented exactly.
 - The prebuilt protection-library loader exists but the integrated scene builder still constructs protection geometry per instance. Address sharing before throughput work or earlier if display-case memory is excessive.
 - Some older numbered test headers describe historical implementations. Treat current source and this status as authoritative; update a script when it becomes the active acceptance test.
 
 ## Next Goals
 
-1. Receive and address the t12 Blender acceptance results.
-2. Implement and review the hand layout in one focused acceptance script.
-3. Revisit occlusion depth/shape limitations exposed by hand geometry.
-4. Proceed to Phase 5 only after Phase 4 is accepted.
+1. Receive and address the t14 integrated grip renders and visualized labels.
+2. Tune source-rig pose axes/contact transforms if t14 exposes intersections.
+3. Mark Phase 4 accepted, then proceed to Phase 5.

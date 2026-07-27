@@ -31,6 +31,11 @@
       "_comment": "max_cards caps the tight grid (24 max). out_of_frustum: keep|remove.",
       "max_cards": 24,
       "out_of_frustum": "keep"
+    },
+    "hand": {
+      "_comment": "One card in a side or pinch grip. out_of_frustum: keep|remove.",
+      "max_cards": 1,
+      "out_of_frustum": "keep"
     }
   }
 }

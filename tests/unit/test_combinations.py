@@ -211,10 +211,25 @@ def test_hand_grip_and_protection():
         cfg = _sample(seed, layouts=["hand"])
         assert len(cfg.cards) == 1
         assert cfg.layout.params["grip"] in C.HAND_GRIPS
+        assert cfg.layout.params["handedness"] in C.HAND_SIDES
+        assert 0.0 <= cfg.layout.params["approach_deg"] < 360.0
+        assert C.HAND_DEPTH_RANGE[0] <= cfg.layout.params["depth"] <= C.HAND_DEPTH_RANGE[1]
+        assert cfg.cards[0].back_to_camera is False
         kind = cfg.cards[0].protection.kind
         assert kind in ("none", "sleeve", "toploader")
         if kind == "none":
             assert cfg.layout.params["grip"] == "pinch"
+
+
+def test_hand_validation_rejects_illegal_manual_config():
+    cfg = _sample(4, layouts=["hand"], protections=["sleeve"])
+    cfg.layout.params["depth"] = 0.9
+    try:
+        C.validate_scene_config(cfg)
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("invalid hand depth must be rejected")
 
 
 def test_unsatisfiable_layout_raises():

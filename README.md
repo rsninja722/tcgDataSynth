@@ -4,7 +4,9 @@ Blender 5.0 synthetic-scene generator for training trading-card detectors. It bu
 
 ## Current State
 
-Phases 0-3 are implemented. Phase 4 has table, floating, binder, and display-case layouts; the display-case and new occlusion-aware label path await a Blender verification run. The hand layout and Phases 5-8 are not implemented.
+Phases 0-3 are implemented. Phase 4 table, floating, binder, display-case, and
+occlusion-aware label paths are accepted. The integrated hand layout awaits its Blender
+acceptance run; Phases 5-8 are not implemented.
 
 See `PROJECT_STATUS.md` for the active checkpoint, validated decisions, and next work. See `LABEL_FORMAT.md` before consuming labels.
 
@@ -63,25 +65,17 @@ The image root must contain `back.png`. Optional `picture_regions.json` entries 
 
 ## Active Acceptance Run
 
-The next user verification is:
+The next user verification is the integrated CC0 hand layout. Set the override if the
+asset is not at the configured default path:
 
 ```bat
-"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" -b -P tests\t12_display_case.py
+set TCG_HAND_ASSET=C:\path\to\Hands + armature.blend
+"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" -b -P tests\t14_hand.py
 ```
 
-Then visualize all emitted pairs:
-
-```bash
-.venv/bin/python labeltools/visualize_all.py
-```
-
-To visualize one pair instead:
-
-```bash
-.venv/bin/python labeltools/visualize.py out/t12_case_toploader_flat_5x5_in.png out/t12_case_toploader_flat_5x5_in.txt
-```
-
-Report the Blender console output and attach the `*_viz.png` files. Expected details are in the test script header and `PROJECT_STATUS.md`.
+Run `.venv\Scripts\python.exe labeltools\visualize_all.py`, then attach all five
+`out/t14_hand_*_viz.png` files and paste the Blender console. Expected details are in
+the test script header and `PROJECT_STATUS.md`.
 
 ## Important Constraint
 
