@@ -7,8 +7,7 @@ from varied angles and grip at shallow/normal positions above the reused noisy t
 Hands are deliberately excluded from label occlusion, so each in-frame card keeps its
 original four-corner polygon even where fingers cover the render.
 
-HOW TO RUN (headless; cv2 and shapely are required in Blender's Python):
-    set TCG_HAND_ASSET=C:\path\to\Hands + armature.blend
+HOW TO RUN (headless; the bundled hand rig, cv2, and shapely are required):
     "C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" -b -P tests\t14_hand.py
 
 OUTPUT (out/): t14_hand_<case>.png + .txt. Then run:

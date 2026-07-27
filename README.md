@@ -4,9 +4,10 @@ Blender 5.0 synthetic-scene generator for training trading-card detectors. It bu
 
 ## Current State
 
-Phases 0-3 are implemented. Phase 4 table, floating, binder, display-case, and
-occlusion-aware label paths are accepted. The integrated hand layout awaits its Blender
-acceptance run; Phases 5-8 are not implemented.
+Phases 0-4 are implemented and accepted, including table, floating, binder,
+display-case, and hand layouts with occlusion-aware labels. Phase 5 camera, lighting,
+and non-sun simplex shadow masks are accepted. Phase 6 post effects is active; Phases
+7-8 are not implemented.
 
 See `PROJECT_STATUS.md` for the active checkpoint, validated decisions, and next work. See `LABEL_FORMAT.md` before consuming labels.
 
@@ -22,7 +23,7 @@ labeltools/     label geometry, serialization, and visualization
 blender/        bpy-only scene construction and rendering
 tests/unit/     container-runnable tests
 tests/t*.py     numbered Blender acceptance scripts
-assets/         checked-in generated texture assets
+assets/         checked-in generated textures and compact Blender libraries
 out/            generated output (ignored)
 ```
 
@@ -63,19 +64,18 @@ set TCG_CARD_IMAGE_ROOT=C:\path\to\card-images
 
 The image root must contain `back.png`. Optional `picture_regions.json` entries use `{card_id: [x0, y0, x1, y1]}` normalized from the image's top-left.
 
-## Active Acceptance Run
+The hand layout loads `assets/hand_rig.blend` by default. `TCG_HAND_ASSET` remains an
+optional diagnostic override for another compatible library.
 
-The next user verification is the integrated CC0 hand layout. Set the override if the
-asset is not at the configured default path:
+The compact hand library passed `tests/t15_hand_asset_bundle.py` under Blender 5.0.0
+and the five integrated `tests/t14_hand.py` cases passed from the bundled default.
+Rebuild and validation instructions are in `assets/HAND_RIG.md`.
 
-```bat
-set TCG_HAND_ASSET=C:\path\to\Hands + armature.blend
-"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" -b -P tests\t14_hand.py
-```
+## Next Phase
 
-Run `.venv\Scripts\python.exe labeltools\visualize_all.py`, then attach all five
-`out/t14_hand_*_viz.png` files and paste the Blender console. Expected details are in
-the test script header and `PROJECT_STATUS.md`.
+Phase 6 will implement and Docker-test deterministic sensor noise, compression,
+pixel-melt blur, white-balance shift, and tint shift before integrating them into the
+Blender render pipeline. See `PROJECT_STATUS.md` for the active acceptance goals.
 
 ## Important Constraint
 

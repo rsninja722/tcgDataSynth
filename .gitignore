@@ -13,3 +13,4 @@ venv/
 .vscode/
 *.blend1
 *.blend2
+*.tmp.blend

@@ -30,8 +30,9 @@ def test_hand_asset_path_default_and_env_override():
     old = os.environ.get("TCG_HAND_ASSET")
     try:
         os.environ.pop("TCG_HAND_ASSET", None)
-        assert config.hand_asset_path().replace("\\", "/").endswith(
-            "/" + config.HAND_ASSET_FILENAME)
+        expected = os.path.join(_ROOT, "assets", config.HAND_ASSET_FILENAME)
+        assert os.path.normcase(config.hand_asset_path()) == os.path.normcase(expected)
+        assert os.path.isabs(config.hand_asset_path())
         override = os.path.join("custom", "hand.blend")
         os.environ["TCG_HAND_ASSET"] = override
         assert config.hand_asset_path() == override

@@ -1,22 +1,22 @@
 # Project Status
 
-Last consolidated: 2026-07-26.
+Last consolidated: 2026-07-27.
 
 ## Active Checkpoint
 
-Phase 4, integrated hand acceptance. Run `tests/t14_hand.py` in Blender 5.0, visualize
-all five image/label pairs, and review grip contact plus original card polygons.
+Phase 6, post effects. The Phase 5 lighting revamp is visually accepted under Blender
+5.0.0 with deterministic per-non-sun-light 50x50 simplex shadow masks.
 
 Acceptance focus:
 
-- Pinch grips place the thumb in front and index behind bare/sleeved/toploadered cards.
-- Side grips put thumb and fingers on opposite faces of sleeves/toploaders.
-- Left/right hands approach from the requested cardinal or diagonal side and vary
-  between shallow and normal contact. Depth is capped at 0.34 because deeper grips
-  clipped into cards during t14 review.
-- The reused noisy table fills the background and skin tones remain plausible.
-- Every fully in-frame hand-held card retains flags 1,2,4,3. Hands and transparent
-  protection do not carve hand-scene labels.
+- Implement deterministic, bpy-free sensor noise, compression artifacts, pixel-melt
+  blur, white-balance shift, and subtle tint shift.
+- Keep every effect independently sampled/enabled from the scene's single seeded NumPy
+  generator.
+- Produce before/after strips from accepted renders and get visual approval before
+  integrating post-processing after Blender rendering.
+- Post-processing must not alter labels or allow an image to be written without its
+  paired label.
 
 ## Phase Progress
 
@@ -24,9 +24,9 @@ Acceptance focus:
 - Phase 1: bare card and fixed-corner projection validated.
 - Phase 2: protection assets implemented; sleeves and holders reviewed, slab review was waived after final connector changes.
 - Phase 3: finish, holo, physical-texture, and damage pipelines implemented and integrated.
-- Phase 4: table, floating, binder, and display case reviewed; integrated hand acceptance active.
-- Phase 5: lighting and camera randomization not started.
-- Phase 6: post effects not started.
+- Phase 4: all five layouts, labels, and the bundled compact hand library accepted.
+- Phase 5: deterministic lighting/camera and final non-sun simplex shadow masks accepted.
+- Phase 6: active; post effects not yet implemented.
 - Phase 7: modal-timer GUI/orchestration not started.
 - Phase 8: throughput comparison and 50-image pilot not started.
 
@@ -47,9 +47,26 @@ Acceptance focus:
 - Damage variation is per instance, not cached solely by card ID.
 - Bulk acrylic label projection uses finite oriented boxes, nominal IOR 1.5, and the
   geometric-normal Snell ray as the apparent scattering centroid.
-- The supplied CC0 hand model was validated in Blender 5.0 and is resolved by
-  `TCG_HAND_ASSET` (with the user's known Windows path as a default).
+- Runtime uses the compact project-local `assets/hand_rig.blend`; `TCG_HAND_ASSET` is
+  only an explicit diagnostic override.
+- The compact hand library keeps both mesh/armature pairs and their dependencies, not
+  the source file's unrelated scene datablocks or legacy materials.
+- `assets/hand_rig.blend` passed t15 under Blender 5.0.0 at 2,680,719 bytes and the
+  accepted five t14 scenes passed from the bundled default without an override.
 - Hands are render-only geometry for labels; they never act as card occluders.
+- Accepted Phase 5 energies are sun `0.028125-0.16875`, points `1.125-22.5`, and fixed
+  phone flash `14.0625`. Two-point scenes cap each point at `14.5`; three-point scenes
+  cap each at `7.5`; one- and four-point scenes use the baseline maximum.
+- Accepted point-light color temperature range is 2000-9000 K.
+- Shadow masks use a 50x50 face grid. Face-center samples combine 2x and 12x seeded
+  simplex noise at 65/35 weights; faces over 0.50 brightness are removed.
+- The sun is never masked. The phone flash and every point light are each independently
+  sampled at 25% when lighting occluders are enabled.
+- Shadow-plane faces are 95% opaque (user-tuned).
+- Masked finite lights use a larger emitter radius than unmasked lights to soften the
+  grid silhouette. The accepted setting midpoints both that radius and the prior/current
+  plane placements to split the difference between sharp and soft shadows; blocker
+  sizing includes the resulting radius so no-hole controls retain cover.
 
 ## Active Label Contract
 
@@ -64,7 +81,8 @@ This is a project blocker before Phase 8: the custom format cannot be passed dir
 - The Blender 2.79 hand meshes, armatures, Multires, constraints, skin materials, and
   control deformation were accepted after the t13 Blender 5.0 report/renders. The
   t13 control-grid meshes were hidden by a diagnostic copy bug, now fixed; numeric
-  control response in the report confirmed all four finger chains.
+  control response in the report confirmed all four finger chains. The generated
+  Blender 5 compact library passed t15 inventory/rig validation and t14 equivalence.
 - Refraction intentionally ignores surface roughness, scratches, smudges, and normal
   maps. Intersecting/touching refractive boxes fail explicitly rather than using an
   incorrect nested-medium approximation.
@@ -72,10 +90,18 @@ This is a project blocker before Phase 8: the custom format cannot be passed dir
   intentionally excluded from occlusion calculations.
 - The single-ring custom format keeps one connected polygon and bridges holes; disconnected visible regions are not represented exactly.
 - The prebuilt protection-library loader exists but the integrated scene builder still constructs protection geometry per instance. Address sharing before throughput work or earlier if display-case memory is excessive.
+- Camera orbit is now sampled explicitly around the 0-50 degree off-axis cone. Point
+  positions and sun angles are interpreted in a camera-relative front-hemisphere basis.
+- The final t17 shadow shape, 95% opacity, and midpoint softness/placement were visually
+  accepted by the user under Blender 5.0.0.
+- Container validation for the lighting revamp passes all 126 unit tests, `compileall`,
+  and `git diff --check`.
 - Some older numbered test headers describe historical implementations. Treat current source and this status as authoritative; update a script when it becomes the active acceptance test.
 
 ## Next Goals
 
-1. Receive and address the t14 integrated grip renders and visualized labels.
-2. Tune source-rig pose axes/contact transforms if t14 exposes intersections.
-3. Mark Phase 4 accepted, then proceed to Phase 5.
+1. Implement and unit-test the five deterministic bpy-free post effects independently.
+2. Generate before/after strips from accepted renders for visual review and parameter
+   tuning.
+3. After visual acceptance, integrate sampled post effects after rendering without
+   changing label geometry or image/label pairing.

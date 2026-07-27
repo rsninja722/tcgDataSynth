@@ -14,6 +14,7 @@ damage; the Blender side assigns actual card images with the same seed.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -43,6 +44,22 @@ DISPLAY_CASE_TOP_PROTECTIONS = ("none", "sleeve", "toploader", "slab")
 
 HOLDER_MAX_ROT_DEG = 1.0    # max card rotation inside a semi-rigid/toploader (user)
 HOLDER_MAX_OFFSET_MM = 2.0  # max card offset inside a holder
+
+SUN_ELEVATION_RANGE = (15.0, 75.0)
+SUN_AZIMUTH_RANGE = (-60.0, 60.0)
+SUN_ENERGY_RANGE = (0.028125, 0.16875)  # low ambient fill; non-sun lights provide key light
+# About twice the reciprocal color warmth of t16's warm_points tile (3962.6 K).
+POINT_TEMP_RANGE = (2000.0, 9000.0)
+POINT_ENERGY_RANGE = (1.125, 22.5)
+POINT_ENERGY_MAX_REDUCTION = {2: 8.0, 3: 15.0}
+POINT_XY_RANGE = (-0.30, 0.30)
+POINT_Z_RANGE = (0.05, 0.40)
+NON_SUN_SHADOW_MASK_PROB = 0.25
+SHADOW_MASK_SEED_MAX = 2 ** 63 - 1
+CAMERA_FOCAL_RANGE = (15.0, 55.0)
+CAMERA_OFFAXIS_RANGE = (0.0, 50.0)
+CAMERA_ORBIT_RANGE = (0.0, 360.0)
+CAMERA_FSTOP_RANGE = (1.8, 8.0)
 
 # Layout -> the set of per-card protections that layout allows (spec §3.5).
 _LAYOUT_PROTECTIONS: Dict[str, tuple] = {
@@ -106,6 +123,7 @@ class PointLightConfig:
     color_temp: float   # kelvin-ish, warm(3000)..cold(9000)
     intensity: float    # watts
     position: List[float]  # xyz, front hemisphere
+    shadow_mask_seed: Optional[int] = None
 
 
 @dataclass
@@ -114,13 +132,14 @@ class LightingConfig:
     sun_energy: float
     spotlight_beside_camera: bool
     point_lights: List[PointLightConfig] = field(default_factory=list)
-    occluder_in_front: bool = False      # 20% chance, partial shadows
+    spotlight_shadow_mask_seed: Optional[int] = None
 
 
 @dataclass
 class CameraConfig:
     focal_mm: float
     offaxis_deg: float
+    orbit_deg: float
     dof_enabled: bool
     aperture_fstop: float
 
@@ -412,6 +431,11 @@ def _loose(rng, opts, kind):
 # --------------------------------------------------------------------------- #
 # Lighting / camera / postfx
 # --------------------------------------------------------------------------- #
+def _point_energy_range(n_points: int) -> tuple[float, float]:
+    reduction = POINT_ENERGY_MAX_REDUCTION.get(n_points, 0.0)
+    return POINT_ENERGY_RANGE[0], POINT_ENERGY_RANGE[1] - reduction
+
+
 def _sample_lighting(rng, opts) -> LightingConfig:
     lopt = opts.get("lighting", {})
     spotlight = bool(lopt.get("spotlight", True)) and _maybe(rng, 0.5)
@@ -422,31 +446,52 @@ def _sample_lighting(rng, opts) -> LightingConfig:
             spotlight = True
         else:
             n_points = 1
+    point_energy_range = _point_energy_range(n_points)
     points = [
         PointLightConfig(
-            color_temp=float(rng.uniform(3000.0, 9000.0)),
-            intensity=float(rng.uniform(2.0, 40.0)),
-            position=[float(rng.uniform(-0.3, 0.3)), float(rng.uniform(-0.3, 0.3)),
-                      float(rng.uniform(0.05, 0.4))],
+            color_temp=float(rng.uniform(*POINT_TEMP_RANGE)),
+            intensity=float(rng.uniform(*point_energy_range)),
+            position=[float(rng.uniform(*POINT_XY_RANGE)),
+                      float(rng.uniform(*POINT_XY_RANGE)),
+                      float(rng.uniform(*POINT_Z_RANGE))],
         )
         for _ in range(n_points)
     ]
-    occluder = bool(lopt.get("occluders", True)) and _maybe(rng, 0.20)
+    sun_angle = [float(rng.uniform(*SUN_ELEVATION_RANGE)),
+                 float(rng.uniform(*SUN_AZIMUTH_RANGE))]
+    sun_energy = float(rng.uniform(*SUN_ENERGY_RANGE))
+
+    masks_enabled = bool(lopt.get("occluders", True))
+    # Draw every non-sun source's activation before any pattern seeds so one enabled
+    # mask cannot alter another source's activation decision.
+    spotlight_has_mask = (masks_enabled and spotlight
+                           and _maybe(rng, NON_SUN_SHADOW_MASK_PROB))
+    point_has_masks = [masks_enabled and _maybe(rng, NON_SUN_SHADOW_MASK_PROB)
+                       for _point in points]
+
+    def mask_seed(enabled: bool) -> Optional[int]:
+        if not enabled:
+            return None
+        return int(rng.integers(0, SHADOW_MASK_SEED_MAX))
+
+    for point, enabled in zip(points, point_has_masks):
+        point.shadow_mask_seed = mask_seed(enabled)
     return LightingConfig(
-        sun_angle_deg=[float(rng.uniform(15.0, 75.0)), float(rng.uniform(-60.0, 60.0))],
-        sun_energy=float(rng.uniform(0.5, 2.0)),
+        sun_angle_deg=sun_angle,
+        sun_energy=sun_energy,
         spotlight_beside_camera=spotlight,
         point_lights=points,
-        occluder_in_front=occluder,
+        spotlight_shadow_mask_seed=mask_seed(spotlight_has_mask),
     )
 
 
 def _sample_camera(rng, opts) -> CameraConfig:
     return CameraConfig(
-        focal_mm=float(rng.uniform(15.0, 55.0)),
-        offaxis_deg=float(rng.uniform(0.0, 50.0)),
+        focal_mm=float(rng.uniform(*CAMERA_FOCAL_RANGE)),
+        offaxis_deg=float(rng.uniform(*CAMERA_OFFAXIS_RANGE)),
+        orbit_deg=float(rng.uniform(*CAMERA_ORBIT_RANGE)),
         dof_enabled=True,
-        aperture_fstop=float(rng.uniform(1.8, 8.0)),
+        aperture_fstop=float(rng.uniform(*CAMERA_FSTOP_RANGE)),
     )
 
 
@@ -480,6 +525,10 @@ def sample_scene_config(enabled_options: Optional[Dict[str, Any]], rng_seed: int
         elif layout.kind == "display_case":
             cols = int(layout.params["cols"])
             layout.params["rows"] = (len(cards) + cols - 1) // cols
+    # Apply this after external truncation so the retained prefix always contains a
+    # potential camera/DoF focus target.
+    if all(card.back_to_camera for card in cards):
+        cards[0].back_to_camera = False
     cfg = SceneConfig(
         seed=int(rng_seed),
         layout=layout,
@@ -530,6 +579,9 @@ def validate_scene_config(cfg: SceneConfig) -> None:
             assert f.holo_region is None and f.holo_pattern is None
             assert f.physical_texture is False
 
+    assert any(not card.back_to_camera for card in cfg.cards), \
+        "scene needs at least one front-facing focus candidate"
+
     # layout-specific protection constraints (spec §3.5)
     lk = cfg.layout.kind
     kinds = {c.protection.kind for c in cfg.cards}
@@ -557,11 +609,45 @@ def validate_scene_config(cfg: SceneConfig) -> None:
         expected = _BINDER_CONTENT_PROTECTION[content]
         assert kinds == {expected}, f"binder({content}) expects {{{expected}}}, got {kinds}"
 
-    # lighting rule (spec §3.6): at least one non-sun light
+    # Lighting ranges and hard rules (spec §3.6).
     lit = cfg.lighting
     assert lit.spotlight_beside_camera or len(lit.point_lights) >= 1, \
         "at least one non-sun light must exist"
+    assert len(lit.sun_angle_deg) == 2
+    elevation, azimuth = (float(value) for value in lit.sun_angle_deg)
+    assert all(math.isfinite(value) for value in (elevation, azimuth, lit.sun_energy))
+    assert SUN_ELEVATION_RANGE[0] <= elevation <= SUN_ELEVATION_RANGE[1]
+    assert SUN_AZIMUTH_RANGE[0] <= azimuth <= SUN_AZIMUTH_RANGE[1]
+    assert SUN_ENERGY_RANGE[0] <= lit.sun_energy <= SUN_ENERGY_RANGE[1]
+    assert 0 <= len(lit.point_lights) <= 4
+    assert lit.spotlight_beside_camera or lit.spotlight_shadow_mask_seed is None, \
+        "a spotlight shadow mask requires a spotlight"
 
-    # camera ranges (spec §3.7)
-    assert 15.0 <= cfg.camera.focal_mm <= 55.0
-    assert 0.0 <= cfg.camera.offaxis_deg <= 50.0
+    def validate_mask_seed(seed) -> None:
+        assert seed is None or (
+            isinstance(seed, int) and not isinstance(seed, bool)
+            and 0 <= seed < SHADOW_MASK_SEED_MAX
+        ), f"invalid shadow mask seed: {seed!r}"
+
+    validate_mask_seed(lit.spotlight_shadow_mask_seed)
+    point_energy_range = _point_energy_range(len(lit.point_lights))
+    for point in lit.point_lights:
+        assert len(point.position) == 3
+        values = (point.color_temp, point.intensity, *point.position)
+        assert all(math.isfinite(float(value)) for value in values)
+        assert POINT_TEMP_RANGE[0] <= point.color_temp <= POINT_TEMP_RANGE[1]
+        assert point_energy_range[0] <= point.intensity <= point_energy_range[1]
+        assert all(POINT_XY_RANGE[0] <= value <= POINT_XY_RANGE[1]
+                   for value in point.position[:2])
+        assert POINT_Z_RANGE[0] <= point.position[2] <= POINT_Z_RANGE[1]
+        validate_mask_seed(point.shadow_mask_seed)
+
+    # Camera ranges and required DoF (spec §3.7).
+    cam = cfg.camera
+    assert all(math.isfinite(value) for value in
+               (cam.focal_mm, cam.offaxis_deg, cam.orbit_deg, cam.aperture_fstop))
+    assert CAMERA_FOCAL_RANGE[0] <= cam.focal_mm <= CAMERA_FOCAL_RANGE[1]
+    assert CAMERA_OFFAXIS_RANGE[0] <= cam.offaxis_deg <= CAMERA_OFFAXIS_RANGE[1]
+    assert CAMERA_ORBIT_RANGE[0] <= cam.orbit_deg < CAMERA_ORBIT_RANGE[1]
+    assert cam.dof_enabled is True
+    assert CAMERA_FSTOP_RANGE[0] <= cam.aperture_fstop <= CAMERA_FSTOP_RANGE[1]

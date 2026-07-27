@@ -262,7 +262,7 @@ def test_max_cards_must_be_positive():
 
 
 # --------------------------------------------------------------------------- #
-# Lighting rule
+# Lighting and camera rules
 # --------------------------------------------------------------------------- #
 def test_at_least_one_non_sun_light():
     for seed in range(200):
@@ -275,6 +275,154 @@ def test_non_sun_light_forced_even_if_disabled():
     for seed in range(40):
         cfg = _sample(seed, lighting={"spotlight": False, "point_lights": False})
         assert cfg.lighting.spotlight_beside_camera or len(cfg.lighting.point_lights) >= 1
+
+
+def test_lighting_camera_ranges_and_focus_candidate():
+    for seed in range(200):
+        cfg = C.sample_scene_config(None, seed)
+        lighting = cfg.lighting
+        camera = cfg.camera
+        assert C.SUN_ELEVATION_RANGE[0] <= lighting.sun_angle_deg[0] <= C.SUN_ELEVATION_RANGE[1]
+        assert C.SUN_AZIMUTH_RANGE[0] <= lighting.sun_angle_deg[1] <= C.SUN_AZIMUTH_RANGE[1]
+        assert C.SUN_ENERGY_RANGE[0] <= lighting.sun_energy <= C.SUN_ENERGY_RANGE[1]
+        assert len(lighting.point_lights) <= 4
+        point_energy_range = C._point_energy_range(len(lighting.point_lights))
+        for point in lighting.point_lights:
+            assert C.POINT_TEMP_RANGE[0] <= point.color_temp <= C.POINT_TEMP_RANGE[1]
+            assert point_energy_range[0] <= point.intensity <= point_energy_range[1]
+            assert all(C.POINT_XY_RANGE[0] <= value <= C.POINT_XY_RANGE[1]
+                       for value in point.position[:2])
+            assert C.POINT_Z_RANGE[0] <= point.position[2] <= C.POINT_Z_RANGE[1]
+        assert C.CAMERA_FOCAL_RANGE[0] <= camera.focal_mm <= C.CAMERA_FOCAL_RANGE[1]
+        assert C.CAMERA_OFFAXIS_RANGE[0] <= camera.offaxis_deg <= C.CAMERA_OFFAXIS_RANGE[1]
+        assert C.CAMERA_ORBIT_RANGE[0] <= camera.orbit_deg < C.CAMERA_ORBIT_RANGE[1]
+        assert camera.dof_enabled is True
+        assert C.CAMERA_FSTOP_RANGE[0] <= camera.aperture_fstop <= C.CAMERA_FSTOP_RANGE[1]
+        assert any(not card.back_to_camera for card in cfg.cards)
+
+
+def test_point_energy_max_reduces_for_two_and_three_lights():
+    assert C._point_energy_range(1) == (1.125, 22.5)
+    assert C._point_energy_range(2) == (1.125, 14.5)
+    assert C._point_energy_range(3) == (1.125, 7.5)
+    assert C._point_energy_range(4) == (1.125, 22.5)
+
+    for count in (2, 3):
+        cfg = None
+        for seed in range(100):
+            candidate = C.sample_scene_config(None, seed)
+            if len(candidate.lighting.point_lights) == count:
+                cfg = candidate
+                break
+        assert cfg is not None
+        cfg.lighting.point_lights[0].intensity = C._point_energy_range(count)[1] + 0.01
+        _expect_invalid(cfg)
+
+
+def _shadow_mask_count(lighting):
+    return int(lighting.spotlight_shadow_mask_seed is not None) + \
+        sum(point.shadow_mask_seed is not None for point in lighting.point_lights)
+
+
+def test_shadow_masks_are_deterministic_and_master_disable_works():
+    for seed in range(100):
+        first = C.sample_scene_config(None, seed).lighting
+        second = C.sample_scene_config(None, seed).lighting
+        assert first == second
+        disabled = _sample(seed, lighting={"occluders": False}).lighting
+        assert _shadow_mask_count(disabled) == 0
+
+
+def test_shadow_masks_sample_independently_per_existing_non_sun_light():
+    spot_eligible = spot_draws = 0
+    point_eligible = point_draws = 0
+    saw_multiple = False
+    for seed in range(5000):
+        lighting = C.sample_scene_config(None, seed).lighting
+        if lighting.spotlight_beside_camera:
+            spot_eligible += 1
+            spot_draws += lighting.spotlight_shadow_mask_seed is not None
+        else:
+            assert lighting.spotlight_shadow_mask_seed is None
+        point_eligible += len(lighting.point_lights)
+        point_draws += sum(point.shadow_mask_seed is not None
+                           for point in lighting.point_lights)
+        saw_multiple |= _shadow_mask_count(lighting) >= 2
+
+    assert 0.22 <= spot_draws / spot_eligible <= 0.28
+    assert 0.22 <= point_draws / point_eligible <= 0.28
+    assert saw_multiple, "sources must not be reduced to one selected shadow mask"
+
+
+def test_loose_layout_always_has_front_facing_card():
+    for layout in ("table", "floating"):
+        for seed in range(50):
+            cfg = _sample(seed, layouts=[layout], back_to_camera_prob=1.0)
+            assert any(not card.back_to_camera for card in cfg.cards)
+
+
+def test_back_facing_cards_remain_legal_with_focus_candidate():
+    saw_mixed_scene = False
+    for seed in range(200):
+        cfg = _sample(seed, layouts=["table"], back_to_camera_prob=0.5)
+        backs = [card.back_to_camera for card in cfg.cards]
+        if any(backs) and not all(backs):
+            saw_mixed_scene = True
+            C.validate_scene_config(cfg)
+    assert saw_mixed_scene, "sampling should retain legal front/back card mixtures"
+
+
+def test_max_cards_retains_front_facing_focus_candidate():
+    for layout in ("table", "floating"):
+        for seed in range(100):
+            cfg = C.sample_scene_config(
+                {"layouts": [layout], "back_to_camera_prob": 0.75}, seed, max_cards=1)
+            assert len(cfg.cards) == 1
+            assert cfg.cards[0].back_to_camera is False
+
+
+def _expect_invalid(cfg):
+    try:
+        C.validate_scene_config(cfg)
+    except AssertionError:
+        return
+    raise AssertionError("invalid scene config must be rejected")
+
+
+def test_validation_rejects_invalid_lighting():
+    cfg = _sample(7, layouts=["table"],
+                  lighting={"spotlight": False, "point_lights": True})
+    cfg.lighting.sun_energy = C.SUN_ENERGY_RANGE[1] + 1.0
+    _expect_invalid(cfg)
+
+    cfg = _sample(7, layouts=["table"],
+                  lighting={"spotlight": False, "point_lights": True})
+    cfg.lighting.point_lights[0].position[2] = -0.1
+    _expect_invalid(cfg)
+
+    cfg = _sample(7, layouts=["table"], lighting={"spotlight": False})
+    cfg.lighting.spotlight_beside_camera = False
+    cfg.lighting.spotlight_shadow_mask_seed = 12
+    _expect_invalid(cfg)
+
+    cfg = _sample(7, layouts=["table"])
+    cfg.lighting.point_lights[0].shadow_mask_seed = True
+    _expect_invalid(cfg)
+
+
+def test_validation_rejects_invalid_camera_or_focus_candidate():
+    cfg = _sample(9, layouts=["table"])
+    cfg.camera.dof_enabled = False
+    _expect_invalid(cfg)
+
+    cfg = _sample(9, layouts=["table"])
+    cfg.camera.orbit_deg = 360.0
+    _expect_invalid(cfg)
+
+    cfg = _sample(9, layouts=["table"])
+    for card in cfg.cards:
+        card.back_to_camera = True
+    _expect_invalid(cfg)
 
 
 def _run_all():

@@ -20,7 +20,8 @@ import cv2  # noqa: E402
 import config  # noqa: E402
 from labeltools import yolo_pose as yp  # noqa: E402
 from labeltools.visualize import (visualize_label_file, visualize_poly_label_file,
-                                  _CORNER_COLORS, _FLAG_COLORS, _to_px)  # noqa: E402
+                                  _BBOX_COLOR, _CORNER_COLORS, _FLAG_COLORS,
+                                  _to_px)  # noqa: E402
 from labeltools.refraction_probe import detect_marker  # noqa: E402
 
 
@@ -149,6 +150,24 @@ def test_poly_visualizer_uses_non_square_image_dimensions():
             pixel = viz[py, px]
             expected = np.array(_FLAG_COLORS[flag], dtype=np.int16)
             assert np.abs(pixel.astype(np.int16) - expected).sum() <= 30
+
+
+def test_poly_visualizer_draws_min_max_bbox():
+    width = height = 200
+    points = ((0.2, 0.5, 1), (0.5, 0.2, 2),
+              (0.8, 0.5, 4), (0.5, 0.8, 3))
+    with tempfile.TemporaryDirectory() as d:
+        img_path = os.path.join(d, "img.png")
+        label_path = os.path.join(d, "img.txt")
+        out_path = os.path.join(d, "viz.png")
+        cv2.imwrite(img_path, np.full((height, width, 3), 128, np.uint8))
+        yp.write_poly_label_file(label_path, [yp.PolyLabel("", points)])
+        visualize_poly_label_file(img_path, label_path, out_path)
+
+        viz = cv2.imread(out_path, cv2.IMREAD_COLOR)
+        bbox_corner = _to_px(0.2, 0.2, width, height)
+        pixel = viz[bbox_corner[1], bbox_corner[0]]
+        assert tuple(pixel) == _BBOX_COLOR
 
 
 def test_refraction_probe_detects_marker_centroid_from_linear_difference():

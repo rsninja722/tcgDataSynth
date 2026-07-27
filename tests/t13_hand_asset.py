@@ -1,14 +1,13 @@
 r"""
-Phase 4 (layout 5/5, checkpoint 1) - HAND ASSET VALIDATION.
+Phase 4 (layout 5/5, historical checkpoint 1) - HAND ASSET VALIDATION.
 
-Validates the supplied CC0 Blender 2.79 left/right hand meshes and armatures after
-Blender 5.0 conversion. This does not yet construct card grips. It inventories the
+Validates the configured CC0 left/right hand meshes and armatures. This does not yet
+construct card grips. It inventories the
 asset, verifies mesh/armature relationships, normalizes both hands beside a real-scale
 63 x 88mm card, replaces the legacy materials with two procedural skin tones, and
 builds a 24-cell +/- X/Y/Z calibration grid for the four named finger controls.
 
-HOW TO RUN (headless):
-    set TCG_HAND_ASSET=C:\path\to\Hands + armature.blend
+HOW TO RUN (headless; the bundled compact library is the default):
     "C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" -b -P tests\t13_hand_asset.py
 
 OUTPUT (out/):
@@ -24,8 +23,8 @@ damage; light/dark skin materials look plausible; and at least one axis/sign in 
 control-grid row visibly curls the corresponding finger. The report must identify two
 mesh/armature pairs and four named controls per armature.
 
-The source .blend is opened read-only through bpy.data.libraries.load and is never
-saved or modified.
+The configured .blend is opened read-only through bpy.data.libraries.load and is never
+saved or modified. Set TCG_HAND_ASSET only to diagnose another compatible library.
 """
 from __future__ import annotations
 
@@ -86,7 +85,8 @@ def _write_report():
 def _append_asset(path):
     if not os.path.isfile(path):
         raise FileNotFoundError(
-            f"Hand asset not found: {path!r}. Set TCG_HAND_ASSET to the CC0 .blend file."
+            f"Hand asset not found: {path!r}. Rebuild the bundled hand library or set "
+            "TCG_HAND_ASSET to a compatible .blend file."
         )
 
     inventory = {}
@@ -468,7 +468,7 @@ def run():
 
     section("Acceptance summary")
     log("PASS requires two intact real-scale hands and four visibly responsive control rows.")
-    log("The source asset was appended locally and was not saved or modified.")
+    log("The configured asset was appended locally and was not saved or modified.")
 
 
 def main():

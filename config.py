@@ -21,17 +21,16 @@ from typing import Tuple
 # the TCG_CARD_IMAGE_ROOT env var when running elsewhere.
 DEFAULT_CARD_IMAGE_ROOT = r"C:\Code\React\CollectiblesApp\src\ai_dev\datasets\pokemon\data\images"
 
-# CC0 left/right rigged hand source used by the Phase 4 hand layout. Keep the
-# binary outside Git; the known Windows location is the default and
-# TCG_HAND_ASSET remains a portable override.
-HAND_ASSET_FILENAME = "Hands + armature.blend"
-DEFAULT_HAND_ASSET_PATH = (
-    r"C:\Code\docker\opencode-secure-docker\inputs\Hands + armature.blend"
-)
+# Compact CC0 left/right rig library bundled with the project. It contains only the
+# hand meshes, armatures, and their required dependencies. TCG_HAND_ASSET remains an
+# explicit override for diagnostics with another compatible library.
+HAND_ASSET_FILENAME = "hand_rig.blend"
+DEFAULT_HAND_ASSET_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "assets", HAND_ASSET_FILENAME)
 
 
 def hand_asset_path() -> str:
-    """Resolved hand .blend path: env override wins, else the known Windows path."""
+    """Resolved hand library path: env override wins, else the bundled asset."""
     return os.environ.get("TCG_HAND_ASSET", DEFAULT_HAND_ASSET_PATH)
 
 # Image extensions treated as card faces during recursive discovery.

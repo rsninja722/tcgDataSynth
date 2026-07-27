@@ -1,8 +1,8 @@
 """CC0 rigged-hand loading, posing, placement, and skin materials (bpy REQUIRED).
 
-The source is the validated Blender 2.79 ``Hands + armature.blend`` asset. Runtime
-loading keeps only one selected mesh/armature pair, limits Multires to level 1, and
-places the pair through a single root transform. The source file is never modified.
+The bundled ``assets/hand_rig.blend`` library contains the validated left/right mesh
+and armature pairs extracted from the supplied CC0 source. Runtime loading keeps only
+one selected pair, limits Multires to level 1, and places it through one root transform.
 """
 from __future__ import annotations
 
@@ -16,18 +16,21 @@ from mathutils import Matrix, Vector
 
 import config
 
-_OBJECTS = {
+HAND_OBJECTS = {
     "left": ("Hand.L", "Hand_Left"),
     "right": ("Hand.R", "Hand_Right"),
 }
-_CONTROLS = ("index control", "Major control", "Ring control", "Pinky control")
-_FINGER_TIPS = {
+HAND_CONTROLS = ("index control", "Major control", "Ring control", "Pinky control")
+HAND_FINGER_TIPS = {
     "index": "Bone.002",
     "middle": "Bone.005",
     "ring": "Bone.008",
     "pinky": "Bone.011",
     "thumb": "Bone.019",
 }
+HAND_REQUIRED_BONES = frozenset(
+    (*HAND_CONTROLS, *HAND_FINGER_TIPS.values(), "Bone.017", "Bone.018", "Bone.020")
+)
 
 # Curated plausible skin colors, sampled and interpolated by the scene RNG.
 _SKIN_TONES = (
@@ -104,13 +107,14 @@ def make_skin_material(name: str, rng):
 
 
 def _load_pair(name: str, handedness: str):
-    if handedness not in _OBJECTS:
+    if handedness not in HAND_OBJECTS:
         raise ValueError(f"Unsupported handedness: {handedness!r}")
     path = config.hand_asset_path()
-    mesh_name, armature_name = _OBJECTS[handedness]
+    mesh_name, armature_name = HAND_OBJECTS[handedness]
     if not os.path.isfile(path):
         raise FileNotFoundError(
-            f"Hand asset not found: {path!r}. Set TCG_HAND_ASSET to the CC0 .blend file."
+            f"Bundled hand asset not found: {path!r}. Rebuild assets/hand_rig.blend "
+            "or set TCG_HAND_ASSET to a compatible library."
         )
 
     with bpy.data.libraries.load(path, link=False) as (data_from, data_to):
@@ -143,7 +147,7 @@ def _load_pair(name: str, handedness: str):
             total = int(getattr(modifier, "total_levels", 1))
             modifier.levels = min(1, total)
             modifier.render_levels = min(1, total)
-    missing_controls = [control for control in _CONTROLS
+    missing_controls = [control for control in HAND_CONTROLS
                         if control not in armature.pose.bones]
     if missing_controls:
         raise RuntimeError(f"Hand armature is missing controls: {missing_controls}")
@@ -171,7 +175,7 @@ def _pose_grip(armature, handedness: str, grip: str, rng):
     else:
         raise ValueError(f"Unsupported grip: {grip!r}")
 
-    for control, degrees in zip(_CONTROLS, curls):
+    for control, degrees in zip(HAND_CONTROLS, curls):
         _rotate_pose_bone(armature, control, "X", -degrees * variation)
     for bone_name, degrees in zip(("Bone.017", "Bone.018", "Bone.019"), thumb_curls):
         _rotate_pose_bone(armature, bone_name, "X", -degrees * variation)
@@ -211,7 +215,7 @@ def _normalize(mesh, armature, name: str, target_size: float):
 
 
 def _bone_tip_world(armature, finger):
-    return armature.matrix_world @ armature.pose.bones[_FINGER_TIPS[finger]].tail
+    return armature.matrix_world @ armature.pose.bones[HAND_FINGER_TIPS[finger]].tail
 
 
 def _contact_points(armature, grip):
