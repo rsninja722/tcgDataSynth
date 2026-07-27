@@ -20,6 +20,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+import config as project_config
+
 # --------------------------------------------------------------------------- #
 # Option value vocabularies (the GUI toggles enable/disable these)
 # --------------------------------------------------------------------------- #
@@ -31,7 +33,10 @@ FINISHES = ("normal", "holo")
 HOLO_REGIONS = ("entire", "picture", "reverse")   # reverse = everything EXCEPT picture
 HOLO_PATTERNS = ("none", "cosmos", "horizontal_lines", "water_web")
 DAMAGE_KINDS = ("dirt", "scratches", "surface")
-POST_EFFECTS = ("sensor_noise", "compression", "pixel_melt", "white_balance", "tint")
+POST_EFFECTS = (
+    "sensor_noise", "compression", "pixel_melt", "white_balance", "tint",
+    "chromatic_aberration", "contrast", "haze",
+)
 BINDER_GRIDS = ("1x1", "2x2", "3x3", "4x3")
 BINDER_CONTENTS = ("sleeved", "toploader", "slab")  # what the binder is sized for
 HAND_GRIPS = ("side", "pinch")
@@ -55,7 +60,9 @@ POINT_ENERGY_MAX_REDUCTION = {2: 8.0, 3: 15.0}
 POINT_XY_RANGE = (-0.30, 0.30)
 POINT_Z_RANGE = (0.05, 0.40)
 NON_SUN_SHADOW_MASK_PROB = 0.25
-SHADOW_MASK_SEED_MAX = 2 ** 63 - 1
+# Blender ID custom properties store Python ints as signed C ints. This is an
+# exclusive upper bound, so generated values are always 0..INT32_MAX.
+SHADOW_MASK_SEED_MAX = 2 ** 31
 CAMERA_FOCAL_RANGE = (15.0, 55.0)
 CAMERA_OFFAXIS_RANGE = (0.0, 50.0)
 CAMERA_ORBIT_RANGE = (0.0, 360.0)
@@ -145,12 +152,62 @@ class CameraConfig:
 
 
 @dataclass
+class SensorNoiseConfig:
+    luma_sigma: float
+    chroma_sigma: float
+    seed: int
+
+
+@dataclass
+class CompressionConfig:
+    jpeg_quality: int
+    cycles: int
+
+
+@dataclass
+class PixelMeltConfig:
+    blur_sigma: float
+    scale: float
+
+
+@dataclass
+class WhiteBalanceConfig:
+    temperature_shift_k: float
+
+
+@dataclass
+class TintConfig:
+    green_magenta_shift: float
+
+
+@dataclass
+class ChromaticAberrationConfig:
+    shift_px: float
+    angle_deg: float
+
+
+@dataclass
+class ContrastConfig:
+    reduction: float
+
+
+@dataclass
+class HazeConfig:
+    strength: float
+    brightness: float
+
+
+@dataclass
 class PostFxConfig:
-    sensor_noise: bool = False
-    compression: bool = False
-    pixel_melt: bool = False
-    white_balance: bool = False
-    tint: bool = False
+    """Fully sampled image effects. ``None`` means that effect is disabled."""
+    sensor_noise: Optional[SensorNoiseConfig] = None
+    compression: Optional[CompressionConfig] = None
+    pixel_melt: Optional[PixelMeltConfig] = None
+    white_balance: Optional[WhiteBalanceConfig] = None
+    tint: Optional[TintConfig] = None
+    chromatic_aberration: Optional[ChromaticAberrationConfig] = None
+    contrast: Optional[ContrastConfig] = None
+    haze: Optional[HazeConfig] = None
 
 
 @dataclass
@@ -495,14 +552,68 @@ def _sample_camera(rng, opts) -> CameraConfig:
     )
 
 
-def _sample_postfx(rng, opts) -> PostFxConfig:
+def _sample_postfx(rng, opts, tuning: Dict[str, Any]) -> PostFxConfig:
     enabled = set(opts.get("post_effects", []))
+    def active(name: str) -> bool:
+        return name in enabled and _maybe(rng, float(tuning[name]["probability"]))
+
+    def uniform(name: str, key: str) -> float:
+        return float(rng.uniform(*tuning[name][key]))
+
+    def integer(name: str, key: str) -> int:
+        low, high = tuning[name][key]
+        return int(rng.integers(int(low), int(high) + 1))
+
+    noise = None
+    if active("sensor_noise"):
+        noise = SensorNoiseConfig(
+            luma_sigma=uniform("sensor_noise", "luma_sigma_range"),
+            chroma_sigma=uniform("sensor_noise", "chroma_sigma_range"),
+            seed=int(rng.integers(0, SHADOW_MASK_SEED_MAX)),
+        )
+    compression = None
+    if active("compression"):
+        compression = CompressionConfig(
+            jpeg_quality=integer("compression", "jpeg_quality_range"),
+            cycles=integer("compression", "cycles_range"),
+        )
+    pixel_melt = None
+    if active("pixel_melt"):
+        pixel_melt = PixelMeltConfig(
+            blur_sigma=uniform("pixel_melt", "blur_sigma_range"),
+            scale=uniform("pixel_melt", "scale_range"),
+        )
+    white_balance = None
+    if active("white_balance"):
+        white_balance = WhiteBalanceConfig(
+            temperature_shift_k=uniform("white_balance", "temperature_shift_k_range"))
+    tint = None
+    if active("tint"):
+        tint = TintConfig(green_magenta_shift=uniform("tint", "green_magenta_shift_range"))
+    chromatic = None
+    if active("chromatic_aberration"):
+        chromatic = ChromaticAberrationConfig(
+            shift_px=uniform("chromatic_aberration", "shift_px_range"),
+            angle_deg=float(rng.uniform(0.0, 360.0)),
+        )
+    contrast = None
+    if active("contrast"):
+        contrast = ContrastConfig(reduction=uniform("contrast", "reduction_range"))
+    haze = None
+    if active("haze"):
+        haze = HazeConfig(
+            strength=uniform("haze", "strength_range"),
+            brightness=uniform("haze", "brightness_range"),
+        )
     return PostFxConfig(
-        sensor_noise=("sensor_noise" in enabled) and _maybe(rng, 0.5),
-        compression=("compression" in enabled) and _maybe(rng, 0.5),
-        pixel_melt=("pixel_melt" in enabled) and _maybe(rng, 0.4),
-        white_balance=("white_balance" in enabled) and _maybe(rng, 0.5),
-        tint=("tint" in enabled) and _maybe(rng, 0.4),
+        sensor_noise=noise,
+        compression=compression,
+        pixel_melt=pixel_melt,
+        white_balance=white_balance,
+        tint=tint,
+        chromatic_aberration=chromatic,
+        contrast=contrast,
+        haze=haze,
     )
 
 
@@ -510,9 +621,10 @@ def _sample_postfx(rng, opts) -> PostFxConfig:
 # Entry point + validation
 # --------------------------------------------------------------------------- #
 def sample_scene_config(enabled_options: Optional[Dict[str, Any]], rng_seed: int,
-                        max_cards: Optional[int] = None) -> SceneConfig:
+                        max_cards: Optional[int] = None, config_path: Optional[str] = None) -> SceneConfig:
     """Sample ONE validated scene config from a seed. Deterministic per seed.
-    `max_cards` (if given) caps the number of cards in the scene."""
+    `max_cards` (if given) caps the number of cards in the scene. `config_path`
+    selects the runtime config.json used for post-effect tuning."""
     if max_cards is not None and int(max_cards) < 1:
         raise ConfigError("max_cards must be at least 1.")
     opts = _resolve(enabled_options)
@@ -535,7 +647,7 @@ def sample_scene_config(enabled_options: Optional[Dict[str, Any]], rng_seed: int
         cards=cards,
         lighting=_sample_lighting(rng, opts),
         camera=_sample_camera(rng, opts),
-        postfx=_sample_postfx(rng, opts),
+        postfx=_sample_postfx(rng, opts, project_config.load_postfx_tuning(config_path)),
     )
     validate_scene_config(cfg)  # never emit an illegal config
     return cfg
@@ -651,3 +763,30 @@ def validate_scene_config(cfg: SceneConfig) -> None:
     assert CAMERA_ORBIT_RANGE[0] <= cam.orbit_deg < CAMERA_ORBIT_RANGE[1]
     assert cam.dof_enabled is True
     assert CAMERA_FSTOP_RANGE[0] <= cam.aperture_fstop <= CAMERA_FSTOP_RANGE[1]
+
+    # Post effects are image-space only; all randomness was sampled into SceneConfig.
+    fx = cfg.postfx
+    def finite(*values):
+        return all(math.isfinite(float(value)) for value in values)
+
+    if fx.sensor_noise is not None:
+        assert finite(fx.sensor_noise.luma_sigma, fx.sensor_noise.chroma_sigma)
+        assert fx.sensor_noise.luma_sigma >= 0.0 and fx.sensor_noise.chroma_sigma >= 0.0
+        validate_mask_seed(fx.sensor_noise.seed)
+    if fx.compression is not None:
+        assert 1 <= fx.compression.jpeg_quality <= 100 and fx.compression.cycles >= 1
+    if fx.pixel_melt is not None:
+        assert finite(fx.pixel_melt.blur_sigma, fx.pixel_melt.scale)
+        assert fx.pixel_melt.blur_sigma >= 0.0 and 0.0 < fx.pixel_melt.scale <= 1.0
+    if fx.white_balance is not None:
+        assert finite(fx.white_balance.temperature_shift_k)
+    if fx.tint is not None:
+        assert finite(fx.tint.green_magenta_shift)
+    if fx.chromatic_aberration is not None:
+        assert finite(fx.chromatic_aberration.shift_px, fx.chromatic_aberration.angle_deg)
+        assert fx.chromatic_aberration.shift_px >= 0.0
+    if fx.contrast is not None:
+        assert 0.0 <= fx.contrast.reduction <= 0.5
+    if fx.haze is not None:
+        assert finite(fx.haze.strength, fx.haze.brightness)
+        assert 0.0 <= fx.haze.strength <= 1.0 and 0.0 <= fx.haze.brightness <= 1.0

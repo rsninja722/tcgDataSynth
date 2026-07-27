@@ -6,7 +6,7 @@ Blender 5.0 synthetic-scene generator for training trading-card detectors. It bu
 
 Phases 0-4 are implemented and accepted, including table, floating, binder,
 display-case, and hand layouts with occlusion-aware labels. Phase 5 camera, lighting,
-and non-sun simplex shadow masks are accepted. Phase 6 post effects is active; Phases
+and non-sun simplex shadow masks are accepted. Phase 6 post effects is complete; Phases
 7-8 are not implemented.
 
 See `PROJECT_STATUS.md` for the active checkpoint, validated decisions, and next work. See `LABEL_FORMAT.md` before consuming labels.
@@ -73,9 +73,12 @@ Rebuild and validation instructions are in `assets/HAND_RIG.md`.
 
 ## Next Phase
 
-Phase 6 will implement and Docker-test deterministic sensor noise, compression,
-pixel-melt blur, white-balance shift, and tint shift before integrating them into the
-Blender render pipeline. See `PROJECT_STATUS.md` for the active acceptance goals.
+Phase 6 implements and Docker-tests deterministic sensor noise, JPEG compression,
+pixel-melt blur, white-balance and tint shifts, chromatic aberration, contrast
+reduction, and haze. Each effect's probability and sampled ranges are in the single
+user-editable `config.json`. `blender/render_output.py` stages the raw render, processed
+image, and custom label before publishing the final pair; `tests/t19_postfx_pipeline.py`
+passed as the Blender acceptance check. See `PROJECT_STATUS.md` for the next checkpoint.
 
 ## Important Constraint
 

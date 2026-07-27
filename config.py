@@ -10,6 +10,7 @@ both the millimetre spec value and the metre value actually used.
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import dataclass, field
 from typing import Tuple
 
@@ -154,6 +155,46 @@ DEFAULT_CONFIG = {
         "emit": 1.6,           # peak flash brightness
         "darken": 0.18,        # base darkening between flashes
     },
+    # Each effect has a per-image enable probability and all of its sampled-value
+    # ranges. config.json is the user-editable source; these are safe fallbacks.
+    "postfx": {
+        "sensor_noise": {
+            "probability": 0.45,
+            "luma_sigma_range": [0.002, 0.012],
+            "chroma_sigma_range": [0.001, 0.006],
+        },
+        "compression": {
+            "probability": 0.40,
+            "jpeg_quality_range": [25, 70],
+            "cycles_range": [1, 3],
+        },
+        "pixel_melt": {
+            "probability": 0.35,
+            "blur_sigma_range": [0.35, 1.15],
+            "scale_range": [0.55, 0.85],
+        },
+        "white_balance": {
+            "probability": 0.40,
+            "temperature_shift_k_range": [-450.0, 450.0],
+        },
+        "tint": {
+            "probability": 0.35,
+            "green_magenta_shift_range": [-0.04, 0.04],
+        },
+        "chromatic_aberration": {
+            "probability": 0.30,
+            "shift_px_range": [0.25, 1.5],
+        },
+        "contrast": {
+            "probability": 0.40,
+            "reduction_range": [0.0, 0.50],
+        },
+        "haze": {
+            "probability": 0.30,
+            "strength_range": [0.02, 0.18],
+            "brightness_range": [0.75, 1.0],
+        },
+    },
     # Per-layout scene params (each scene type has its OWN set). Add entries here as
     # layouts are built (out_of_frustum: 'keep' = render but don't label | 'remove').
     "layouts": {
@@ -168,6 +209,61 @@ DEFAULT_CONFIG = {
 # Back-compat alias (used by tests / older references).
 DEFAULT_HOLO_TUNING = DEFAULT_CONFIG["holo"]
 _OUT_OF_FRUSTUM_CHOICES = ("keep", "remove")
+_POSTFX_INTEGER_RANGES = {("compression", "jpeg_quality_range"),
+                          ("compression", "cycles_range")}
+_POSTFX_RANGE_BOUNDS = {
+    ("sensor_noise", "luma_sigma_range"): (0.0, 1.0),
+    ("sensor_noise", "chroma_sigma_range"): (0.0, 1.0),
+    ("pixel_melt", "blur_sigma_range"): (0.0, 50.0),
+    ("pixel_melt", "scale_range"): (0.01, 1.0),
+    ("white_balance", "temperature_shift_k_range"): (-10000.0, 10000.0),
+    ("tint", "green_magenta_shift_range"): (-1.0, 1.0),
+    ("chromatic_aberration", "shift_px_range"): (0.0, 100.0),
+    ("contrast", "reduction_range"): (0.0, 0.5),
+    ("haze", "strength_range"): (0.0, 1.0),
+    ("haze", "brightness_range"): (0.0, 1.0),
+}
+
+
+def _valid_number(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) \
+        and math.isfinite(float(value))
+
+
+def _validated_postfx_tuning(tuning: dict) -> dict:
+    """Return safe post-effect tuning with probabilities and numeric ranges normalized."""
+    defaults = DEFAULT_CONFIG["postfx"]
+    out = {}
+    for effect, default_values in defaults.items():
+        candidate = tuning.get(effect, {}) if isinstance(tuning, dict) else {}
+        values = {}
+        probability = candidate.get("probability", default_values["probability"])
+        if not _valid_number(probability):
+            probability = default_values["probability"]
+        values["probability"] = min(1.0, max(0.0, float(probability)))
+        for key, default_range in default_values.items():
+            if key == "probability":
+                continue
+            supplied = candidate.get(key, default_range)
+            if not isinstance(supplied, (list, tuple)) or len(supplied) != 2 \
+                    or not all(_valid_number(value) for value in supplied):
+                supplied = default_range
+            low, high = sorted(float(value) for value in supplied)
+            if (effect, key) in _POSTFX_INTEGER_RANGES:
+                low, high = int(round(low)), int(round(high))
+                if key == "jpeg_quality_range":
+                    low, high = max(1, low), min(100, high)
+                else:
+                    low, high = max(1, low), max(1, high)
+                if low > high:
+                    low, high = default_range
+            else:
+                allowed_low, allowed_high = _POSTFX_RANGE_BOUNDS[(effect, key)]
+                if low < allowed_low or high > allowed_high:
+                    low, high = default_range
+            values[key] = [low, high]
+        out[effect] = values
+    return out
 
 
 def _coerce(default_val, new):
@@ -212,6 +308,7 @@ def load_config(path: str = None) -> dict:
         except Exception:  # noqa: BLE001
             raw = {}
     cfg = _deep_merge(DEFAULT_CONFIG, raw)
+    cfg["postfx"] = _validated_postfx_tuning(cfg["postfx"])
     for lp in cfg.get("layouts", {}).values():   # validate enums
         if lp.get("out_of_frustum") not in _OUT_OF_FRUSTUM_CHOICES:
             lp["out_of_frustum"] = "keep"
@@ -226,3 +323,8 @@ def load_holo_tuning(path: str = None) -> dict:
 def load_layout_params(layout: str, path: str = None) -> dict:
     """Per-layout scene params (e.g. 'table', 'floating')."""
     return load_config(path)["layouts"].get(layout, {})
+
+
+def load_postfx_tuning(path: str = None) -> dict:
+    """Validated post-effect probabilities and sampled-value ranges."""
+    return load_config(path)["postfx"]

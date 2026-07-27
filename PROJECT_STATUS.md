@@ -4,19 +4,10 @@ Last consolidated: 2026-07-27.
 
 ## Active Checkpoint
 
-Phase 6, post effects. The Phase 5 lighting revamp is visually accepted under Blender
-5.0.0 with deterministic per-non-sun-light 50x50 simplex shadow masks.
+Phase 6 is complete. The post-effect review and Blender 5.0 output-transaction
+acceptance both passed. Phase 7 has not started.
 
-Acceptance focus:
-
-- Implement deterministic, bpy-free sensor noise, compression artifacts, pixel-melt
-  blur, white-balance shift, and subtle tint shift.
-- Keep every effect independently sampled/enabled from the scene's single seeded NumPy
-  generator.
-- Produce before/after strips from accepted renders and get visual approval before
-  integrating post-processing after Blender rendering.
-- Post-processing must not alter labels or allow an image to be written without its
-  paired label.
+The next checkpoint will be defined when Phase 7 GUI/orchestration planning begins.
 
 ## Phase Progress
 
@@ -26,7 +17,9 @@ Acceptance focus:
 - Phase 3: finish, holo, physical-texture, and damage pipelines implemented and integrated.
 - Phase 4: all five layouts, labels, and the bundled compact hand library accepted.
 - Phase 5: deterministic lighting/camera and final non-sun simplex shadow masks accepted.
-- Phase 6: active; post effects not yet implemented.
+- Phase 6: complete. All eight configurable image-space effects passed review, and the
+  `t19` Blender 5.0 output-transaction acceptance passed with aligned labels and no
+  staged-output leftovers.
 - Phase 7: modal-timer GUI/orchestration not started.
 - Phase 8: throughput comparison and 50-image pilot not started.
 
@@ -100,8 +93,4 @@ This is a project blocker before Phase 8: the custom format cannot be passed dir
 
 ## Next Goals
 
-1. Implement and unit-test the five deterministic bpy-free post effects independently.
-2. Generate before/after strips from accepted renders for visual review and parameter
-   tuning.
-3. After visual acceptance, integrate sampled post effects after rendering without
-   changing label geometry or image/label pairing.
+1. Await Phase 7 GUI/orchestration planning direction.

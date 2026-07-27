@@ -17,6 +17,7 @@ def test_project_config_json_loads():
     cfg = config.load_config()
     assert set(cfg) == set(config.DEFAULT_CONFIG)
     assert set(cfg["holo"]) == set(config.DEFAULT_CONFIG["holo"])
+    assert set(cfg["postfx"]) == set(config.DEFAULT_CONFIG["postfx"])
     # per-layout sections
     assert "table" in cfg["layouts"] and "floating" in cfg["layouts"]
     assert config.load_layout_params("hand")["max_cards"] == 1
@@ -78,6 +79,24 @@ def test_missing_and_malformed_fall_back():
         with open(p, "w") as fh:
             fh.write("{ not valid json ]")
         assert config.load_config(p) == config.DEFAULT_CONFIG
+
+
+def test_postfx_probabilities_and_ranges_are_normalized():
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "config.json")
+        with open(p, "w") as fh:
+            json.dump({"postfx": {
+                "sensor_noise": {"probability": 2.0, "luma_sigma_range": [0.02, 0.01]},
+                "compression": {"jpeg_quality_range": [90, 20], "cycles_range": [0, 0]},
+                "contrast": {"reduction_range": [-0.1, 0.7]},
+            }}, fh)
+        fx = config.load_postfx_tuning(p)
+        assert fx["sensor_noise"]["probability"] == 1.0
+        assert fx["sensor_noise"]["luma_sigma_range"] == [0.01, 0.02]
+        assert fx["compression"]["jpeg_quality_range"] == [20, 90]
+        assert fx["compression"]["cycles_range"] == [1, 1]
+        assert fx["contrast"]["reduction_range"] \
+            == config.DEFAULT_CONFIG["postfx"]["contrast"]["reduction_range"]
 
 
 def _run_all():

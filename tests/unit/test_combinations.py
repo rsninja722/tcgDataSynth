@@ -333,6 +333,17 @@ def test_shadow_masks_are_deterministic_and_master_disable_works():
         assert _shadow_mask_count(disabled) == 0
 
 
+def test_shadow_mask_seeds_fit_blender_custom_property_c_ints():
+    assert C.SHADOW_MASK_SEED_MAX == 2 ** 31
+    for seed in range(500):
+        lighting = C.sample_scene_config(None, seed).lighting
+        seeds = [lighting.spotlight_shadow_mask_seed]
+        seeds.extend(point.shadow_mask_seed for point in lighting.point_lights)
+        for mask_seed in seeds:
+            if mask_seed is not None:
+                assert 0 <= mask_seed < C.SHADOW_MASK_SEED_MAX
+
+
 def test_shadow_masks_sample_independently_per_existing_non_sun_light():
     spot_eligible = spot_draws = 0
     point_eligible = point_draws = 0

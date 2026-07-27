@@ -8,6 +8,45 @@
     "emit": 1.6,
     "darken": 0.18
   },
+  "postfx": {
+    "_comment": "Each effect is independently sampled. probability is its per-image enable chance; every *_range is [minimum, maximum].",
+    "sensor_noise": {
+      "probability": 0.45,
+      "luma_sigma_range": [0.002, 0.012],
+      "chroma_sigma_range": [0.002, 0.03]
+    },
+    "compression": {
+      "probability": 0.4,
+      "jpeg_quality_range": [25, 70],
+      "cycles_range": [1, 3]
+    },
+    "pixel_melt": {
+      "probability": 0.35,
+      "blur_sigma_range": [0.35, 1.15],
+      "scale_range": [0.55, 0.85]
+    },
+    "white_balance": {
+      "probability": 0.4,
+      "temperature_shift_k_range": [-450.0, 450.0]
+    },
+    "tint": {
+      "probability": 0.35,
+      "green_magenta_shift_range": [-0.04, 0.04]
+    },
+    "chromatic_aberration": {
+      "probability": 0.3,
+      "shift_px_range": [0.25, 1.5]
+    },
+    "contrast": {
+      "probability": 0.4,
+      "reduction_range": [0.0, 0.5]
+    },
+    "haze": {
+      "probability": 0.3,
+      "strength_range": [0.02, 0.18],
+      "brightness_range": [0.75, 1.0]
+    }
+  },
   "layouts": {
     "table": {
       "_comment": "max_cards, allow_overlap (~15% vs spaced), out_of_frustum ('keep'=render unlabeled | 'remove'=don't render).",
