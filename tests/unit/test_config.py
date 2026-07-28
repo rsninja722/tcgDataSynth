@@ -18,9 +18,12 @@ def test_project_config_json_loads():
     assert set(cfg) == set(config.DEFAULT_CONFIG)
     assert set(cfg["holo"]) == set(config.DEFAULT_CONFIG["holo"])
     assert set(cfg["postfx"]) == set(config.DEFAULT_CONFIG["postfx"])
+    assert cfg["camera"]["aperture_fstop_range"] == [1.8, 8.0]
+    assert cfg["lighting"]["shadow_plane_opacity"] == 0.95
     # per-layout sections
     assert "table" in cfg["layouts"] and "floating" in cfg["layouts"]
     assert config.load_layout_params("hand")["max_cards"] == 1
+    assert config.load_layout_params("display_case")["camera_max_offaxis_deg"] == 30.0
     assert "max_shapes" in config.load_layout_params("floating")
     assert config.load_holo_tuning()["angle_gain"] == cfg["holo"]["angle_gain"]
     assert config.load_layout_params("table")["max_cards"] == cfg["layouts"]["table"]["max_cards"]
@@ -72,6 +75,19 @@ def test_out_of_frustum_enum_validated_per_layout():
         assert cfg["layouts"]["floating"]["out_of_frustum"] == "remove"  # valid kept
 
 
+def test_layout_camera_offaxis_maximum_is_validated():
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "config.json")
+        with open(p, "w") as fh:
+            json.dump({"layouts": {
+                "table": {"camera_max_offaxis_deg": 12.5},
+                "display_case": {"camera_max_offaxis_deg": 90.0},
+            }}, fh)
+        cfg = config.load_config(p)
+        assert cfg["layouts"]["table"]["camera_max_offaxis_deg"] == 12.5
+        assert cfg["layouts"]["display_case"]["camera_max_offaxis_deg"] == 30.0
+
+
 def test_missing_and_malformed_fall_back():
     assert config.load_config("/no/such/file.json") == config.DEFAULT_CONFIG
     with tempfile.TemporaryDirectory() as d:
@@ -97,6 +113,24 @@ def test_postfx_probabilities_and_ranges_are_normalized():
         assert fx["compression"]["cycles_range"] == [1, 1]
         assert fx["contrast"]["reduction_range"] \
             == config.DEFAULT_CONFIG["postfx"]["contrast"]["reduction_range"]
+
+
+def test_camera_and_lighting_tuning_are_validated():
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "config.json")
+        with open(p, "w") as fh:
+            json.dump({"camera": {"aperture_fstop_range": [11.0, 2.4]},
+                       "lighting": {"shadow_plane_opacity": 1.5}}, fh)
+        cfg = config.load_config(p)
+        assert cfg["camera"]["aperture_fstop_range"] == [2.4, 11.0]
+        assert cfg["lighting"]["shadow_plane_opacity"] == 1.0
+
+        with open(p, "w") as fh:
+            json.dump({"camera": {"aperture_fstop_range": [-1.0, 100.0]},
+                       "lighting": {"shadow_plane_opacity": "bad"}}, fh)
+        cfg = config.load_config(p)
+        assert cfg["camera"] == config.DEFAULT_CONFIG["camera"]
+        assert cfg["lighting"] == config.DEFAULT_CONFIG["lighting"]
 
 
 def test_generation_settings_are_validated_and_persisted():

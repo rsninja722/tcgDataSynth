@@ -24,7 +24,8 @@ from blender.labeling import label_scene  # noqa: E402
 from blender.render_output import render_poly_label_pair  # noqa: E402
 from blender.render_setup import setup_render  # noqa: E402
 from rules import combinations  # noqa: E402
-from rules.generation import (append_completed_pair, pair_paths, resume_next_index)  # noqa: E402
+from rules.generation import (append_completed_pair, append_refraction_failures,  # noqa: E402
+                              pair_paths, resume_next_index)
 from texturegen.cardsource import CardLibrary  # noqa: E402
 
 
@@ -35,6 +36,7 @@ def _output_layout(root: str | None) -> config.OutputLayout:
         labels_subdir=config.OUTPUT.labels_subdir,
         std_labels_subdir=config.OUTPUT.std_labels_subdir,
         manifest_name=config.OUTPUT.manifest_name,
+        refraction_failures_name=config.OUTPUT.refraction_failures_name,
     )
 
 
@@ -88,12 +90,18 @@ def run_one(index: int, config_path: str | None = None, output_root: str | None 
     instances, known_extent = _build_layout(
         scene_cfg, library, cache_dir, scene_rng, settings["enabled_options"], config_path)
     bpy.context.view_layer.update()
-    target, measured_extent = camera.subject_target_and_extent(instances)
-    extent = known_extent or measured_extent
+    target, focus_instance = camera.random_focus_target(instances, scene_rng)
+    measured_extent = camera.subject_extent_from_target(instances, target)
+    extent = max(float(known_extent or 0.0), measured_extent)
     cam = camera.build_camera(scene_cfg.camera, target, extent)
+    camera.focus_on_card(cam, scene_cfg.camera, focus_instance)
+    camera.zoom_to_card_boundary(scene, cam, instances, scene_rng)
     lighting.build_lighting(scene_cfg.lighting, cam, target, extent)
-    results = label_scene(scene, cam, instances)
-    camera.focus_on_labeled_card(cam, scene_cfg.camera, results)
+    refraction_failures = []
+    results = label_scene(
+        scene, cam, instances, refraction_failures=refraction_failures)
+    for failure in refraction_failures:
+        failure["layout"] = scene_cfg.layout.kind
     remove_outside = config.load_layout_params(
         scene_cfg.layout.kind, config_path)["out_of_frustum"] == "remove"
     labels = []
@@ -105,6 +113,11 @@ def run_one(index: int, config_path: str | None = None, output_root: str | None 
                 obj.hide_render = True
     bpy.context.view_layer.update()
     render_poly_label_pair(scene, paths.image_path, paths.label_path, labels, scene_cfg.postfx)
+    failure_path = append_refraction_failures(output, paths, refraction_failures)
+    if refraction_failures:
+        print(f"[generation_worker] WARNING used direct polygons for "
+              f"{len(refraction_failures)} card(s) with unsolved refraction; "
+              f"details: {failure_path}")
     append_completed_pair(output, paths, scene_cfg.to_dict())
     return {
         "index": index,
@@ -114,6 +127,8 @@ def run_one(index: int, config_path: str | None = None, output_root: str | None 
         "label": paths.label_path,
         "label_count": len(labels),
         "layout": scene_cfg.layout.kind,
+        "refraction_failure_count": len(refraction_failures),
+        "refraction_failures": failure_path,
     }
 
 

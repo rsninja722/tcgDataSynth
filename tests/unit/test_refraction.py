@@ -116,6 +116,26 @@ def test_grazing_side_entry_converges_without_branch_jump():
         assert np.allclose(traced.hit, target, atol=1e-7)
 
 
+def test_solver_searches_neighbor_branch_when_direct_trial_has_tir():
+    lid = _box(half=(0.5, 0.5, 0.05), name="display-case-lid")
+    camera = (0.3631900856782384, -0.7564844164146461, 0.5795418936322998)
+    target = (-0.6517616666704081, -0.3557103238427461, -0.3)
+    direct = np.asarray(target) - np.asarray(camera)
+    direct /= np.linalg.norm(direct)
+    try:
+        trace_to_plane(camera, direct, target, (0.0, 0.0, 1.0), [lid])
+    except RefractionError as exc:
+        assert "total internal reflection" in str(exc)
+    else:
+        raise AssertionError("regression geometry must make the direct trial undergo TIR")
+
+    ray = solve_camera_ray(camera, target, (1.0, 0.0, 0.0),
+                           (0.0, 1.0, 0.0), [lid])
+    traced = trace_to_plane(camera, ray, target, (0.0, 0.0, 1.0), [lid])
+    assert np.allclose(traced.hit, target, atol=1e-7)
+    assert traced.crossed
+
+
 def _run_all():
     tests = [value for key, value in sorted(globals().items())
              if key.startswith("test_") and callable(value)]

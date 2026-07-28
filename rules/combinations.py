@@ -34,7 +34,7 @@ HOLO_REGIONS = ("entire", "picture", "reverse")   # reverse = everything EXCEPT 
 HOLO_PATTERNS = ("none", "cosmos", "horizontal_lines", "water_web")
 DAMAGE_KINDS = ("dirt", "scratches", "surface")
 POST_EFFECTS = (
-    "sensor_noise", "compression", "pixel_melt", "white_balance", "tint",
+    "motion_blur", "sensor_noise", "compression", "pixel_melt", "white_balance", "tint",
     "chromatic_aberration", "contrast", "haze",
 )
 BINDER_GRIDS = ("1x1", "2x2", "3x3", "4x3")
@@ -65,8 +65,10 @@ NON_SUN_SHADOW_MASK_PROB = 0.25
 SHADOW_MASK_SEED_MAX = 2 ** 31
 CAMERA_FOCAL_RANGE = (15.0, 55.0)
 CAMERA_OFFAXIS_RANGE = (0.0, 50.0)
+CAMERA_OFFAXIS_ALLOWED_RANGE = (0.0, 89.0)
 CAMERA_ORBIT_RANGE = (0.0, 360.0)
 CAMERA_FSTOP_RANGE = (1.8, 8.0)
+CAMERA_FSTOP_ALLOWED_RANGE = (0.1, 64.0)
 
 # Layout -> the set of per-card protections that layout allows (spec §3.5).
 _LAYOUT_PROTECTIONS: Dict[str, tuple] = {
@@ -140,6 +142,7 @@ class LightingConfig:
     spotlight_beside_camera: bool
     point_lights: List[PointLightConfig] = field(default_factory=list)
     spotlight_shadow_mask_seed: Optional[int] = None
+    shadow_plane_opacity: float = 0.95
 
 
 @dataclass
@@ -156,6 +159,12 @@ class SensorNoiseConfig:
     luma_sigma: float
     chroma_sigma: float
     seed: int
+
+
+@dataclass
+class MotionBlurConfig:
+    direction_index: int
+    strength: float
 
 
 @dataclass
@@ -200,6 +209,7 @@ class HazeConfig:
 @dataclass
 class PostFxConfig:
     """Fully sampled image effects. ``None`` means that effect is disabled."""
+    motion_blur: Optional[MotionBlurConfig] = None
     sensor_noise: Optional[SensorNoiseConfig] = None
     compression: Optional[CompressionConfig] = None
     pixel_melt: Optional[PixelMeltConfig] = None
@@ -493,7 +503,7 @@ def _point_energy_range(n_points: int) -> tuple[float, float]:
     return POINT_ENERGY_RANGE[0], POINT_ENERGY_RANGE[1] - reduction
 
 
-def _sample_lighting(rng, opts) -> LightingConfig:
+def _sample_lighting(rng, opts, tuning: Dict[str, Any]) -> LightingConfig:
     lopt = opts.get("lighting", {})
     spotlight = bool(lopt.get("spotlight", True)) and _maybe(rng, 0.5)
     n_points = int(rng.integers(0, 5)) if lopt.get("point_lights", True) else 0
@@ -539,16 +549,17 @@ def _sample_lighting(rng, opts) -> LightingConfig:
         spotlight_beside_camera=spotlight,
         point_lights=points,
         spotlight_shadow_mask_seed=mask_seed(spotlight_has_mask),
+        shadow_plane_opacity=float(tuning["shadow_plane_opacity"]),
     )
 
 
-def _sample_camera(rng, opts) -> CameraConfig:
+def _sample_camera(rng, opts, tuning: Dict[str, Any], max_offaxis_deg: float) -> CameraConfig:
     return CameraConfig(
         focal_mm=float(rng.uniform(*CAMERA_FOCAL_RANGE)),
-        offaxis_deg=float(rng.uniform(*CAMERA_OFFAXIS_RANGE)),
+        offaxis_deg=float(rng.uniform(CAMERA_OFFAXIS_RANGE[0], max_offaxis_deg)),
         orbit_deg=float(rng.uniform(*CAMERA_ORBIT_RANGE)),
         dof_enabled=True,
-        aperture_fstop=float(rng.uniform(*CAMERA_FSTOP_RANGE)),
+        aperture_fstop=float(rng.uniform(*tuning["aperture_fstop_range"])),
     )
 
 
@@ -564,6 +575,12 @@ def _sample_postfx(rng, opts, tuning: Dict[str, Any]) -> PostFxConfig:
         low, high = tuning[name][key]
         return int(rng.integers(int(low), int(high) + 1))
 
+    motion_blur = None
+    if active("motion_blur"):
+        motion_blur = MotionBlurConfig(
+            direction_index=int(rng.integers(0, 16)),
+            strength=uniform("motion_blur", "strength_range"),
+        )
     noise = None
     if active("sensor_noise"):
         noise = SensorNoiseConfig(
@@ -606,6 +623,7 @@ def _sample_postfx(rng, opts, tuning: Dict[str, Any]) -> PostFxConfig:
             brightness=uniform("haze", "brightness_range"),
         )
     return PostFxConfig(
+        motion_blur=motion_blur,
         sensor_noise=noise,
         compression=compression,
         pixel_melt=pixel_melt,
@@ -643,13 +661,16 @@ def sample_scene_config(enabled_options: Optional[Dict[str, Any]], rng_seed: int
     # potential camera/DoF focus target.
     if all(card.back_to_camera for card in cards):
         cards[0].back_to_camera = False
+    runtime_tuning = project_config.load_config(config_path)
+    max_offaxis_deg = float(
+        runtime_tuning["layouts"][layout.kind]["camera_max_offaxis_deg"])
     cfg = SceneConfig(
         seed=int(rng_seed),
         layout=layout,
         cards=cards,
-        lighting=_sample_lighting(rng, opts),
-        camera=_sample_camera(rng, opts),
-        postfx=_sample_postfx(rng, opts, project_config.load_postfx_tuning(config_path)),
+        lighting=_sample_lighting(rng, opts, runtime_tuning["lighting"]),
+        camera=_sample_camera(rng, opts, runtime_tuning["camera"], max_offaxis_deg),
+        postfx=_sample_postfx(rng, opts, runtime_tuning["postfx"]),
     )
     validate_scene_config(cfg)  # never emit an illegal config
     return cfg
@@ -727,6 +748,8 @@ def validate_scene_config(cfg: SceneConfig) -> None:
     lit = cfg.lighting
     assert lit.spotlight_beside_camera or len(lit.point_lights) >= 1, \
         "at least one non-sun light must exist"
+    assert math.isfinite(lit.shadow_plane_opacity)
+    assert 0.0 <= lit.shadow_plane_opacity <= 1.0
     assert len(lit.sun_angle_deg) == 2
     elevation, azimuth = (float(value) for value in lit.sun_angle_deg)
     assert all(math.isfinite(value) for value in (elevation, azimuth, lit.sun_energy))
@@ -761,16 +784,22 @@ def validate_scene_config(cfg: SceneConfig) -> None:
     assert all(math.isfinite(value) for value in
                (cam.focal_mm, cam.offaxis_deg, cam.orbit_deg, cam.aperture_fstop))
     assert CAMERA_FOCAL_RANGE[0] <= cam.focal_mm <= CAMERA_FOCAL_RANGE[1]
-    assert CAMERA_OFFAXIS_RANGE[0] <= cam.offaxis_deg <= CAMERA_OFFAXIS_RANGE[1]
+    assert CAMERA_OFFAXIS_ALLOWED_RANGE[0] <= cam.offaxis_deg <= CAMERA_OFFAXIS_ALLOWED_RANGE[1]
     assert CAMERA_ORBIT_RANGE[0] <= cam.orbit_deg < CAMERA_ORBIT_RANGE[1]
     assert cam.dof_enabled is True
-    assert CAMERA_FSTOP_RANGE[0] <= cam.aperture_fstop <= CAMERA_FSTOP_RANGE[1]
+    assert CAMERA_FSTOP_ALLOWED_RANGE[0] <= cam.aperture_fstop <= CAMERA_FSTOP_ALLOWED_RANGE[1]
 
     # Post effects are image-space only; all randomness was sampled into SceneConfig.
     fx = cfg.postfx
     def finite(*values):
         return all(math.isfinite(float(value)) for value in values)
 
+    if fx.motion_blur is not None:
+        assert isinstance(fx.motion_blur.direction_index, int) \
+            and not isinstance(fx.motion_blur.direction_index, bool)
+        assert 0 <= fx.motion_blur.direction_index < 16
+        assert finite(fx.motion_blur.strength)
+        assert 0.0 <= fx.motion_blur.strength <= 1.0
     if fx.sensor_noise is not None:
         assert finite(fx.sensor_noise.luma_sigma, fx.sensor_noise.chroma_sigma)
         assert fx.sensor_noise.luma_sigma >= 0.0 and fx.sensor_noise.chroma_sigma >= 0.0

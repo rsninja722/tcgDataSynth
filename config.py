@@ -129,6 +129,7 @@ class OutputLayout:
     # Optional sibling folder for strictly-standard labels (no |id suffix), spec §3.9.
     std_labels_subdir: str = "labels_standard"
     manifest_name: str = "manifest.jsonl"
+    refraction_failures_name: str = "refraction_failures.txt"
 
     def images_dir(self) -> str:
         return os.path.join(self.root, self.images_subdir)
@@ -138,6 +139,9 @@ class OutputLayout:
 
     def std_labels_dir(self) -> str:
         return os.path.join(self.root, self.std_labels_subdir)
+
+    def refraction_failures_path(self) -> str:
+        return os.path.join(self.root, self.refraction_failures_name)
 
 
 OUTPUT = OutputLayout()
@@ -157,9 +161,19 @@ DEFAULT_CONFIG = {
         "emit": 1.6,           # peak flash brightness
         "darken": 0.18,        # base darkening between flashes
     },
+    "camera": {
+        "aperture_fstop_range": [1.8, 8.0],
+    },
+    "lighting": {
+        "shadow_plane_opacity": 0.95,
+    },
     # Each effect has a per-image enable probability and all of its sampled-value
     # ranges. config.json is the user-editable source; these are safe fallbacks.
     "postfx": {
+        "motion_blur": {
+            "probability": 1.0,
+            "strength_range": [0.12, 0.22],
+        },
         "sensor_noise": {
             "probability": 0.45,
             "luma_sigma_range": [0.002, 0.012],
@@ -216,19 +230,24 @@ DEFAULT_CONFIG = {
             "binder_contents": ["sleeved", "toploader", "slab"],
             "lighting": {"spotlight": True, "point_lights": True, "occluders": True},
             "post_effects": ["sensor_noise", "compression", "pixel_melt", "white_balance",
-                             "tint", "chromatic_aberration", "contrast", "haze"],
+                             "tint", "chromatic_aberration", "contrast", "haze",
+                             "motion_blur"],
             "back_to_camera_prob": 0.15,
         },
     },
     # Per-layout scene params (each scene type has its OWN set). Add entries here as
     # layouts are built (out_of_frustum: 'keep' = render but don't label | 'remove').
     "layouts": {
-        "table": {"max_cards": 8, "allow_overlap": False, "out_of_frustum": "keep"},
+        "table": {"max_cards": 8, "allow_overlap": False, "out_of_frustum": "keep",
+                  "camera_max_offaxis_deg": 50.0},
         "floating": {"max_cards": 12, "max_shapes": 12, "allow_overlap": False,
-                     "out_of_frustum": "keep"},
-        "binder": {"max_cards": 12, "out_of_frustum": "keep"},
-        "display_case": {"max_cards": 24, "out_of_frustum": "keep"},
-        "hand": {"max_cards": 1, "out_of_frustum": "keep"},
+                     "out_of_frustum": "keep", "camera_max_offaxis_deg": 50.0},
+        "binder": {"max_cards": 12, "out_of_frustum": "keep",
+                   "camera_max_offaxis_deg": 50.0},
+        "display_case": {"max_cards": 24, "out_of_frustum": "keep",
+                         "camera_max_offaxis_deg": 30.0},
+        "hand": {"max_cards": 1, "out_of_frustum": "keep",
+                 "camera_max_offaxis_deg": 50.0},
     },
 }
 # Back-compat alias (used by tests / older references).
@@ -237,6 +256,7 @@ _OUT_OF_FRUSTUM_CHOICES = ("keep", "remove")
 _POSTFX_INTEGER_RANGES = {("compression", "jpeg_quality_range"),
                           ("compression", "cycles_range")}
 _POSTFX_RANGE_BOUNDS = {
+    ("motion_blur", "strength_range"): (0.0, 1.0),
     ("sensor_noise", "luma_sigma_range"): (0.0, 1.0),
     ("sensor_noise", "chroma_sigma_range"): (0.0, 1.0),
     ("pixel_melt", "blur_sigma_range"): (0.0, 50.0),
@@ -248,6 +268,8 @@ _POSTFX_RANGE_BOUNDS = {
     ("haze", "strength_range"): (0.0, 1.0),
     ("haze", "brightness_range"): (0.0, 1.0),
 }
+_CAMERA_FSTOP_ALLOWED_RANGE = (0.1, 64.0)
+_CAMERA_OFFAXIS_ALLOWED_RANGE = (0.0, 89.0)
 GENERATION_SEED_MAX = 2 ** 63 - 1
 
 
@@ -290,6 +312,28 @@ def _validated_postfx_tuning(tuning: dict) -> dict:
             values[key] = [low, high]
         out[effect] = values
     return out
+
+
+def _validated_camera_tuning(tuning: dict) -> dict:
+    """Return a physically valid, ordered aperture sampling range."""
+    default = DEFAULT_CONFIG["camera"]["aperture_fstop_range"]
+    supplied = tuning.get("aperture_fstop_range", default) if isinstance(tuning, dict) else default
+    if not isinstance(supplied, (list, tuple)) or len(supplied) != 2 \
+            or not all(_valid_number(value) for value in supplied):
+        supplied = default
+    low, high = sorted(float(value) for value in supplied)
+    if low < _CAMERA_FSTOP_ALLOWED_RANGE[0] or high > _CAMERA_FSTOP_ALLOWED_RANGE[1]:
+        low, high = default
+    return {"aperture_fstop_range": [low, high]}
+
+
+def _validated_lighting_tuning(tuning: dict) -> dict:
+    """Return normalized lighting values used directly by generated scenes."""
+    default = DEFAULT_CONFIG["lighting"]["shadow_plane_opacity"]
+    supplied = tuning.get("shadow_plane_opacity", default) if isinstance(tuning, dict) else default
+    if not _valid_number(supplied):
+        supplied = default
+    return {"shadow_plane_opacity": min(1.0, max(0.0, float(supplied)))}
 
 
 def _validated_generation(settings: dict) -> dict:
@@ -372,11 +416,19 @@ def load_config(path: str = None) -> dict:
         except Exception:  # noqa: BLE001
             raw = {}
     cfg = _deep_merge(DEFAULT_CONFIG, raw)
+    cfg["camera"] = _validated_camera_tuning(cfg["camera"])
+    cfg["lighting"] = _validated_lighting_tuning(cfg["lighting"])
     cfg["postfx"] = _validated_postfx_tuning(cfg["postfx"])
     cfg["generation"] = _validated_generation(cfg["generation"])
-    for lp in cfg.get("layouts", {}).values():   # validate enums
+    for name, lp in cfg.get("layouts", {}).items():
         if lp.get("out_of_frustum") not in _OUT_OF_FRUSTUM_CHOICES:
             lp["out_of_frustum"] = "keep"
+        maximum = lp.get("camera_max_offaxis_deg")
+        if not _valid_number(maximum) or not (
+                _CAMERA_OFFAXIS_ALLOWED_RANGE[0] <= maximum
+                <= _CAMERA_OFFAXIS_ALLOWED_RANGE[1]):
+            lp["camera_max_offaxis_deg"] = \
+                DEFAULT_CONFIG["layouts"][name]["camera_max_offaxis_deg"]
     return cfg
 
 
@@ -393,6 +445,16 @@ def load_layout_params(layout: str, path: str = None) -> dict:
 def load_postfx_tuning(path: str = None) -> dict:
     """Validated post-effect probabilities and sampled-value ranges."""
     return load_config(path)["postfx"]
+
+
+def load_camera_tuning(path: str = None) -> dict:
+    """Validated camera sampling tuning."""
+    return load_config(path)["camera"]
+
+
+def load_lighting_tuning(path: str = None) -> dict:
+    """Validated lighting tuning."""
+    return load_config(path)["lighting"]
 
 
 def load_generation_settings(path: str = None) -> dict:

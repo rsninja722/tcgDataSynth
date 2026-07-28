@@ -7,7 +7,7 @@ HOW TO RUN:
     "C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe" tests\t18_postfx.py
 
 OUTPUT (out/):
-    t18_postfx_00..07_<effect>.png + .txt + _viz.png
+    t18_postfx_00..08_<effect>.png + .txt + _viz.png
     t18_postfx_contact.png
     t18_postfx_report.json
 

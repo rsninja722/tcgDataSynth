@@ -23,6 +23,8 @@ from labeltools.refraction import (BOUNDS_MAX_PROPERTY, BOUNDS_MIN_PROPERTY,
 from rules import combinations as C
 
 _ASSETS = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets"))
+_GRID_JITTER_M = 0.002
+_GRID_JITTER_ROT_RAD = math.radians(1.0)
 
 
 def _plane(name: str, sx: float, sy: float, z: float = 0.0):
@@ -173,6 +175,19 @@ def _box(name: str, sx: float, sy: float, sz: float):
     return o
 
 
+def _apply_grid_jitter(instance, rng) -> None:
+    """Break up rigid grids by moving and rotating the complete protected unit."""
+    dx = float(rng.uniform(-_GRID_JITTER_M, _GRID_JITTER_M))
+    dy = float(rng.uniform(-_GRID_JITTER_M, _GRID_JITTER_M))
+    rz = float(rng.uniform(-_GRID_JITTER_ROT_RAD, _GRID_JITTER_ROT_RAD))
+    instance.root.location.x += dx
+    instance.root.location.y += dy
+    instance.root.rotation_euler.z += rz
+    instance.root["tcg_grid_jitter_x_mm"] = dx / 0.001
+    instance.root["tcg_grid_jitter_y_mm"] = dy / 0.001
+    instance.root["tcg_grid_jitter_rotation_deg"] = math.degrees(rz)
+
+
 # --------------------------------------------------------------------------- #
 # Binder (spec §3.5.1): two-layer pages (clear front over cards, colored/clear back)
 # in a grid, on a hard-cover board with a spine; one or two offset pages.
@@ -249,6 +264,7 @@ def _build_binder_page(pivot, pivot_x, pcx, page_w, page_h, pad, cw, ch, gap, ro
                                       cache_dir, rng)
         inst.root.location = (local(pcx + sx), sy, ct / 2 + 0.0004)
         inst.root.rotation_euler = (math.pi if card_cfg.back_to_camera else 0.0, 0.0, 0.0)
+        _apply_grid_jitter(inst, rng)
         inst.root.parent = pivot
         instances.append(inst)
 
@@ -440,6 +456,7 @@ def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, enabled_options
             rx += math.pi
         inst.root.location = (cx, loc_y, loc_z)
         inst.root.rotation_euler = (rx, 0.0, 0.0)
+        _apply_grid_jitter(inst, rng)
         instances.append(inst)
         top_z = max(top_z, loc_z + half)          # top-front corner world z
 

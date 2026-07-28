@@ -4,31 +4,7 @@ Last consolidated: 2026-07-27.
 
 ## Active Checkpoint
 
-Phase 7, standalone GUI and orchestration. The active goal is a desktop Python GUI
-that persists option toggles, launches one headless Blender worker per pair, writes a
-contiguous seed manifest, and safely pauses/resumes only between completed pairs.
-
-Acceptance focus:
-
-- Verify `tests/t20_standalone_generation.py` completes one isolated worker pair under
-  Blender 5.0.0.
-- Interactively verify `gui.py` Start, Pause during rendering, Resume, and contiguous
-  `out/images`, `out/labels`, and `out/manifest.jsonl` records with a small run.
-
-## Phase Progress
-
-- Phase 0: Blender 5.0 API introspection complete.
-- Phase 1: bare card and fixed-corner projection validated.
-- Phase 2: protection assets implemented; sleeves and holders reviewed, slab review was waived after final connector changes.
-- Phase 3: finish, holo, physical-texture, and damage pipelines implemented and integrated.
-- Phase 4: all five layouts, labels, and the bundled compact hand library accepted.
-- Phase 5: deterministic lighting/camera and final non-sun simplex shadow masks accepted.
-- Phase 6: complete. All eight configurable image-space effects passed review, and the
-  `t19` Blender 5.0 output-transaction acceptance passed with aligned labels and no
-  staged-output leftovers.
-- Phase 7: standalone GUI/worker orchestration implementation and Docker validation
-  complete; Blender worker plus interactive Start-Pause-Resume acceptance pending.
-- Phase 8: throughput comparison and 50-image pilot not started.
+version 1 complete
 
 ## Locked Decisions
 
@@ -63,11 +39,24 @@ Acceptance focus:
   simplex noise at 65/35 weights; faces over 0.50 brightness are removed.
 - The sun is never masked. The phone flash and every point light are each independently
   sampled at 25% when lighting occluders are enabled.
-- Shadow-plane faces are 95% opaque (user-tuned).
+- Shadow-plane opacity is read from `config.json`; the current default is 95%.
 - Masked finite lights use a larger emitter radius than unmasked lights to soften the
   grid silhouette. The accepted setting midpoints both that radius and the prior/current
   plane placements to split the difference between sharp and soft shadows; blocker
   sizing includes the resulting radius so no-hole controls retain cover.
+- Binder and display-case card units receive independent +/-2mm XY offsets and
+  +/-1-degree center rotations. Existing card-within-holder transforms remain nested.
+- Every image samples a center-weighted 7x7 motion-blur trail in one of 16 directions.
+  The default effect probability is 1.0 and its light copy strength is configurable.
+- Camera f-stop sampling uses `camera.aperture_fstop_range` in `config.json`.
+- Camera off-axis maxima are configurable per layout. Display cases are limited to
+  30 degrees from straight down; all other layouts currently retain 50 degrees.
+- Production cameras aim and focus through one randomly selected front-facing card.
+  After layout construction, fully contained scenes zoom in by 1mm focal-length steps
+  to the first card/frustum crossing and randomly retain that step or roll back 1-2;
+  scenes already containing a partial/out-of-view card keep their initial zoom.
+- Sun, point, and phone-flash emitter sizes were increased modestly to soften shadow
+  edges. Shadow masks retain their accepted placement and 50x50 breakup geometry.
 
 ## Active Label Contract
 
@@ -87,20 +76,23 @@ This is a project blocker before Phase 8: the custom format cannot be passed dir
 - Refraction intentionally ignores surface roughness, scratches, smudges, and normal
   maps. Intersecting/touching refractive boxes fail explicitly rather than using an
   incorrect nested-medium approximation.
+- A total-internal-reflection result from the initial direct apparent-ray trial causes
+  the solver to search nearby finite-box transmission branches. If any card corner
+  still has no converged branch, production uses the direct pre-refraction four-corner
+  polygon for both labeling and occlusion and appends the fallback instance to
+  `refraction_failures.txt`.
 - Card-card occlusion still uses projected rectangles and mean depth. Hand geometry is
   intentionally excluded from occlusion calculations.
 - The single-ring custom format keeps one connected polygon and bridges holes; disconnected visible regions are not represented exactly.
 - The prebuilt protection-library loader exists but the integrated scene builder still constructs protection geometry per instance. Address sharing before throughput work or earlier if display-case memory is excessive.
 - Camera orbit is now sampled explicitly around the 0-50 degree off-axis cone. Point
   positions and sun angles are interpreted in a camera-relative front-hemisphere basis.
-- The final t17 shadow shape, 95% opacity, and midpoint softness/placement were visually
-  accepted by the user under Blender 5.0.0.
-- Container validation for the lighting revamp passes all 126 unit tests, `compileall`,
-  and `git diff --check`.
+- The final t17 shadow shape and midpoint placement were visually accepted by the user
+  under Blender 5.0.0. The later configurable opacity/softness touch-up awaits t21 review.
+- Container validation for the project-wide touch-up passes all 148 unit tests,
+  `compileall`, and `git diff --check`.
+- The t21 Blender 5.0 touch-up acceptance script has not yet been run in this container,
+  which has no Blender.
 - Some older numbered test headers describe historical implementations. Treat current source and this status as authoritative; update a script when it becomes the active acceptance test.
 
 ## Next Goals
-
-1. Complete the Phase 7 Docker tests and Blender `t20` registration/interactive
-   Start-Pause-Resume acceptance.
-2. Mark Phase 7 complete after the small-run image/label/manifest continuity report.

@@ -207,11 +207,11 @@ def main():
         source_light = rig.spotlight if source == "spotlight" else rig.points[0]
         soft_size = float(source_light.data.shadow_soft_size)
         if source == "spotlight":
-            expected_soft_size = 0.012 if mode == "none" else 0.0185
+            expected_soft_size = (0.012 if mode == "none" else 0.0185) * 1.2
         else:
-            expected_soft_size = (max(0.005, extent * 0.025) if mode == "none"
-                                  else (max(0.005, extent * 0.025)
-                                        + max(0.012, extent * 0.05)) / 2.0)
+            expected_soft_size = ((max(0.005, extent * 0.025) if mode == "none"
+                                   else (max(0.005, extent * 0.025)
+                                         + max(0.012, extent * 0.05)) / 2.0) * 1.2)
         assert abs(soft_size - expected_soft_size) < 1e-6
 
         current_results = label_scene(scene, camera, instances)

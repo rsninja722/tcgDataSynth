@@ -11,8 +11,9 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import config  # noqa: E402
-from rules.generation import (ResumeError, append_completed_pair, pair_paths,
-                              resume_next_index, seed_for_index, stem_for_index)  # noqa: E402
+from rules.generation import (ResumeError, append_completed_pair,  # noqa: E402
+                              append_refraction_failures, pair_paths,
+                              resume_next_index, seed_for_index, stem_for_index)
 
 
 def _output(root: str) -> config.OutputLayout:
@@ -92,6 +93,42 @@ def test_manifest_mismatch_is_rejected():
             pass
         else:
             raise AssertionError("manifest seed mismatch must fail resume")
+
+
+def test_refraction_failures_are_appended_beside_manifest():
+    with tempfile.TemporaryDirectory() as d:
+        output = _output(d)
+        paths = pair_paths(output, 2026073, 1)
+        assert append_refraction_failures(output, paths, []) is None
+        try:
+            append_refraction_failures(output, paths, [{"card_id": "before-pair"}])
+        except ResumeError:
+            pass
+        else:
+            raise AssertionError("diagnostics must not precede the published pair")
+
+        _write_pair(paths)
+        failures = [{
+            "card_id": "bw8-40",
+            "instance_name": "Card7_slab",
+            "corner_index": 2,
+            "corner_name": "TR",
+            "error": "apparent-ray solver could not find a decreasing step",
+        }]
+        diagnostics = append_refraction_failures(output, paths, failures)
+        assert diagnostics == os.path.abspath(output.refraction_failures_path())
+        assert os.path.dirname(diagnostics) == os.path.dirname(
+            os.path.join(os.path.abspath(d), output.manifest_name))
+        with open(diagnostics, encoding="utf-8") as handle:
+            records = [json.loads(line) for line in handle if line.strip()]
+        assert records == [{
+            "index": 1,
+            "seed": 2026074,
+            "stem": "000001_seed2026074",
+            "image": os.path.join("images", "000001_seed2026074.png"),
+            "label": os.path.join("labels", "000001_seed2026074.txt"),
+            **failures[0],
+        }]
 
 
 def _run_all():

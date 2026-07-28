@@ -136,6 +136,31 @@ def append_completed_pair(output: config.OutputLayout, paths: PairPaths,
         os.fsync(handle.fileno())
 
 
+def append_refraction_failures(output: config.OutputLayout, paths: PairPaths,
+                               failures: list[dict[str, Any]]) -> Optional[str]:
+    """Append direct-fallback optical diagnostics after its output pair is published."""
+    if not failures:
+        return None
+    if not os.path.isfile(paths.image_path) or not os.path.isfile(paths.label_path):
+        raise ResumeError("Cannot record refraction failures before the output pair exists")
+    output_path = os.path.abspath(output.refraction_failures_path())
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "a", encoding="utf-8") as handle:
+        for failure in failures:
+            record = {
+                "index": paths.index,
+                "seed": paths.seed,
+                "stem": paths.stem,
+                "image": paths.image_relpath,
+                "label": paths.label_relpath,
+                **failure,
+            }
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    return output_path
+
+
 def resume_next_index(output: config.OutputLayout, base_seed: int, count: int) -> int:
     """Validate/recover a contiguous output prefix and return its next index.
 

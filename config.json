@@ -9,8 +9,26 @@
     "emit": 1.6,
     "darken": 0.18
   },
+  "camera": {
+    "_comment": "Range of f-stop values sampled for depth of field.",
+    "aperture_fstop_range": [
+      8.0,
+      20.0
+    ]
+  },
+  "lighting": {
+    "_comment": "shadow_plane_opacity controls attenuation from generated shadow masks (0=transparent, 1=opaque).",
+    "shadow_plane_opacity": 0.90
+  },
   "postfx": {
     "_comment": "Each effect is independently sampled. probability is its per-image enable chance; every *_range is [minimum, maximum].",
+    "motion_blur": {
+      "probability": 0.1,
+      "strength_range": [
+        0.12,
+        0.22
+      ]
+    },
     "sensor_noise": {
       "probability": 0.45,
       "luma_sigma_range": [
@@ -34,7 +52,7 @@
       ]
     },
     "pixel_melt": {
-      "probability": 0.35,
+      "probability": 0.2,
       "blur_sigma_range": [
         0.35,
         1.15
@@ -45,7 +63,7 @@
       ]
     },
     "white_balance": {
-      "probability": 0.4,
+      "probability": 0.2,
       "temperature_shift_k_range": [
         -450.0,
         450.0
@@ -66,14 +84,14 @@
       ]
     },
     "contrast": {
-      "probability": 0.4,
+      "probability": 0.15,
       "reduction_range": [
         0.0,
         0.5
       ]
     },
     "haze": {
-      "probability": 0.3,
+      "probability": 0.15,
       "strength_range": [
         0.02,
         0.18
@@ -85,8 +103,8 @@
     }
   },
   "generation": {
-    "count": 3,
-    "base_seed": 20260731,
+    "count": 50,
+    "base_seed": 345435,
     "enabled_options": {
       "layouts": [
         "table",
@@ -155,39 +173,45 @@
         "tint",
         "chromatic_aberration",
         "contrast",
-        "haze"
+        "haze",
+        "motion_blur"
       ],
-      "back_to_camera_prob": 0.15
+      "back_to_camera_prob": 0.05
     }
   },
   "layouts": {
     "table": {
-      "_comment": "max_cards, allow_overlap (~15% vs spaced), out_of_frustum ('keep'=render unlabeled | 'remove'=don't render).",
+      "_comment": "max_cards, allow_overlap (~15% vs spaced), out_of_frustum ('keep'=render unlabeled | 'remove'=don't render), camera_max_offaxis_deg (angle from straight down).",
       "max_cards": 8,
       "allow_overlap": false,
-      "out_of_frustum": "keep"
+      "out_of_frustum": "keep",
+      "camera_max_offaxis_deg": 50.0
     },
     "floating": {
       "_comment": "max_cards, max_shapes (background prisms+cylinders), allow_overlap, out_of_frustum.",
       "max_cards": 12,
       "max_shapes": 12,
       "allow_overlap": false,
-      "out_of_frustum": "keep"
+      "out_of_frustum": "keep",
+      "camera_max_offaxis_deg": 50.0
     },
     "binder": {
       "_comment": "max_cards caps filled slots. out_of_frustum: keep|remove.",
       "max_cards": 12,
-      "out_of_frustum": "keep"
+      "out_of_frustum": "keep",
+      "camera_max_offaxis_deg": 50.0
     },
     "display_case": {
       "_comment": "max_cards caps the tight grid (24 max). out_of_frustum: keep|remove.",
       "max_cards": 24,
-      "out_of_frustum": "keep"
+      "out_of_frustum": "keep",
+      "camera_max_offaxis_deg": 30.0
     },
     "hand": {
       "_comment": "One card in a side or pinch grip. out_of_frustum: keep|remove.",
       "max_cards": 1,
-      "out_of_frustum": "keep"
+      "out_of_frustum": "keep",
+      "camera_max_offaxis_deg": 50.0
     }
   }
 }

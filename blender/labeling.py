@@ -24,6 +24,10 @@ from labeltools.refraction import (BOUNDS_MAX_PROPERTY, BOUNDS_MIN_PROPERTY,
                                    solve_camera_ray)
 
 
+class CornerProjectionError(RuntimeError):
+    """One ideal card corner has no solved apparent camera ray."""
+
+
 def ideal_corners_local(
     width: float = config.CARD_W_M,
     height: float = config.CARD_H_M,
@@ -123,7 +127,7 @@ def _project_apparent_corner(scene, cam, world_corner, card_x, card_y, boxes, ca
         ray = solve_camera_ray(tuple(camera_pos), tuple(world_corner),
                                tuple(card_x), tuple(card_y), boxes)
     except RefractionError as exc:
-        raise RuntimeError(
+        raise CornerProjectionError(
             f"Could not project refracted corner for {card_name!r}: {exc}"
         ) from exc
     # Perspective image coordinates depend on ray direction, not the distance of this
@@ -133,7 +137,8 @@ def _project_apparent_corner(scene, cam, world_corner, card_x, card_y, boxes, ca
     return apparent.x, apparent.y, direct.z
 
 
-def label_scene(scene, cam, instances, area_frac: float = 0.25):
+def label_scene(scene, cam, instances, area_frac: float = 0.25,
+                refraction_failures: Optional[List[dict]] = None):
     """Two-pass, occlusion-aware labeling for a whole scene.
 
     Returns a list of (instance, PolyLabel|None, reason). Each card's visible-region
@@ -150,9 +155,29 @@ def label_scene(scene, cam, instances, area_frac: float = 0.25):
         linear = mw.to_3x3()
         card_x = (linear @ Vector((1.0, 0.0, 0.0))).normalized()
         card_y = (linear @ Vector((0.0, 1.0, 0.0))).normalized()
-        ndc = [_project_apparent_corner(scene, cam, mw @ lc, card_x, card_y,
-                                        boxes, inst.card_id)
-               for lc in ideal_corners_local()]
+        local_corners = ideal_corners_local()
+        ndc = []
+        for corner_index, local_corner in enumerate(local_corners):
+            try:
+                projected_corner = _project_apparent_corner(
+                    scene, cam, mw @ local_corner, card_x, card_y, boxes, inst.card_id)
+            except CornerProjectionError as exc:
+                if refraction_failures is not None:
+                    refraction_failures.append({
+                        "card_id": inst.card_id,
+                        "instance_name": inst.root.name,
+                        "protection_kind": inst.protection.kind,
+                        "corner_index": corner_index + 1,
+                        "corner_name": config.KEYPOINT_ORDER[corner_index],
+                        "error": str(exc.__cause__ or exc),
+                        "fallback": "direct-card-polygon",
+                    })
+                ndc = []
+                for direct_corner in local_corners:
+                    direct = world_to_camera_view(scene, cam, mw @ direct_corner)
+                    ndc.append((direct.x, direct.y, direct.z))
+                break
+            ndc.append(projected_corner)
         fv = is_front_visible(front_normal_world(inst.card),
                               cam.matrix_world.translation, mw.translation)
         depth = sum(z for (_x, _y, z) in ndc) / 4.0

@@ -13,7 +13,7 @@ _ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from postfx.effects import apply_postfx, apply_postfx_file  # noqa: E402
+from postfx.effects import _motion_blur_kernel, apply_postfx, apply_postfx_file  # noqa: E402
 from rules import combinations as C  # noqa: E402
 
 
@@ -25,6 +25,7 @@ def _image() -> np.ndarray:
 
 def _all_effects() -> C.PostFxConfig:
     return C.PostFxConfig(
+        motion_blur=C.MotionBlurConfig(3, 0.18),
         sensor_noise=C.SensorNoiseConfig(0.012, 0.006, 123456),
         compression=C.CompressionConfig(25, 2),
         pixel_melt=C.PixelMeltConfig(1.1, 0.60),
@@ -62,10 +63,19 @@ def test_each_effect_changes_a_colored_image():
         assert not np.array_equal(result, image), name
 
 
+def test_motion_blur_uses_normalized_7x7_kernel_and_16_directions():
+    kernels = [_motion_blur_kernel(direction, 0.18) for direction in range(16)]
+    assert all(kernel.shape == (7, 7) for kernel in kernels)
+    assert all(np.isclose(float(kernel.sum()), 1.0) for kernel in kernels)
+    assert len({kernel.tobytes() for kernel in kernels}) == 16
+    assert all(np.count_nonzero(kernel) >= 3 for kernel in kernels)
+
+
 def test_postfx_sampling_honors_config_ranges_and_effect_toggles():
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "config.json")
         tuning = {
+            "motion_blur": {"probability": 1.0, "strength_range": [0.2, 0.2]},
             "sensor_noise": {"probability": 1.0, "luma_sigma_range": [0.01, 0.01],
                              "chroma_sigma_range": [0.005, 0.005]},
             "compression": {"probability": 1.0, "jpeg_quality_range": [30, 30],
@@ -84,6 +94,8 @@ def test_postfx_sampling_honors_config_ranges_and_effect_toggles():
         cfg = C.sample_scene_config({"layouts": ["table"], "post_effects": list(C.POST_EFFECTS)},
                                     44, config_path=path)
         assert all(getattr(cfg.postfx, name) is not None for name in C.POST_EFFECTS)
+        assert cfg.postfx.motion_blur.strength == 0.2
+        assert 0 <= cfg.postfx.motion_blur.direction_index < 16
         assert cfg.postfx.sensor_noise.luma_sigma == 0.01
         assert cfg.postfx.compression.jpeg_quality == 30
         assert cfg.postfx.pixel_melt.scale == 0.7

@@ -26,6 +26,13 @@ A front-facing card is omitted entirely when nearer cards cover more than 80% of
 original in-frustum projected area. Transparent protection does not count as an opaque
 occluder; occlusion follows the embedded card's offset and rotation.
 
+When any ideal corner has no converged finite-box refraction solution, all four corners
+of that card fall back to their direct pre-refraction projections. This complete direct
+polygon remains eligible for labeling and is used as the card's occluder. Production
+generation records each fallback in `refraction_failures.txt` beside `manifest.jsonl`,
+including image/label paths, seed, card ID, instance, protection, failed corner, solver
+error, and fallback mode.
+
 Hands are deliberately excluded from occlusion calculations. A hand-held card retains
 its original frustum-clipped label even where fingers cover part of the rendered card.
 

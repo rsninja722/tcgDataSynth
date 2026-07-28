@@ -7,7 +7,9 @@ Blender 5.0 synthetic-scene generator for training trading-card detectors. It bu
 Phases 0-4 are implemented and accepted, including table, floating, binder,
 display-case, and hand layouts with occlusion-aware labels. Phase 5 camera, lighting,
 and non-sun simplex shadow masks are accepted. Phase 6 post effects is complete; Phase
-7 standalone GUI/orchestration is active and Phase 8 is not implemented.
+7 standalone GUI/orchestration is complete and Phase 8 is not implemented. Current
+project-wide tuning includes nonuniform binder/display grids, randomized focus-aware
+boundary framing, softer shadows, configurable aperture/shadow opacity, and motion blur.
 
 See `PROJECT_STATUS.md` for the active checkpoint, validated decisions, and next work. See `LABEL_FORMAT.md` before consuming labels.
 
@@ -18,7 +20,7 @@ The development container has no Blender or GUI. Code is split accordingly:
 ```text
 rules/          deterministic scene sampling and legality
 texturegen/     OpenCV/NumPy texture generation
-postfx/         render post-processing (not implemented yet)
+postfx/         deterministic render post-processing
 labeltools/     label geometry, serialization, and visualization
 blender/        bpy-only scene construction and rendering
 tests/unit/     container-runnable tests
@@ -84,10 +86,12 @@ The GUI persists its count, base seed, and option toggles to `config.json`. It l
 one headless Blender worker per pair, so Pause waits for the active pair to be published
 and prevents any later worker from starting. Completed pairs are in `out/images` and
 `out/labels`; `out/manifest.jsonl` makes resume numbering deterministic and gap-safe.
+Rare card instances whose finite-box corner refraction cannot be solved use their direct
+pre-refraction polygon for labels/occlusion and are listed in `out/refraction_failures.txt`.
 
 ## Next Phase
 
-Phase 6 implements and Docker-tests deterministic sensor noise, JPEG compression,
+Phase 6 implements and Docker-tests deterministic 16-direction motion blur, sensor noise, JPEG compression,
 pixel-melt blur, white-balance and tint shifts, chromatic aberration, contrast
 reduction, and haze. Each effect's probability and sampled ranges are in the single
 user-editable `config.json`. `blender/render_output.py` stages the raw render, processed

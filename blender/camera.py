@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 
 import bpy
+from bpy_extras.object_utils import world_to_camera_view
 from mathutils import Vector
 
 import config
@@ -24,6 +25,29 @@ def subject_target_and_extent(instances):
                                 + half_depth ** 2)
         radius = max(radius, (center - target).length + unit_radius)
     return target, max(2.0 * radius, config.CARD_H_M)
+
+
+def subject_extent_from_target(instances, target) -> float:
+    """Conservative subject diameter around an explicit world-space camera target."""
+    target = Vector(target)
+    radius = 0.0
+    for instance in instances:
+        center = instance.root.matrix_world.translation
+        width, height = sb.protection_footprint(instance.protection)
+        half_depth = sb.protection_half_thickness(instance.protection)
+        unit_radius = math.sqrt((width / 2.0) ** 2 + (height / 2.0) ** 2
+                                + half_depth ** 2)
+        radius = max(radius, (center - target).length + unit_radius)
+    return max(2.0 * radius, config.CARD_H_M)
+
+
+def random_focus_target(instances, rng):
+    """Choose a front-facing configured card and return its center and instance."""
+    candidates = [instance for instance in instances if not instance.back_to_camera]
+    if not candidates:
+        raise RuntimeError("Camera focus requires a front-facing card instance")
+    instance = candidates[int(rng.integers(0, len(candidates)))]
+    return instance.card.matrix_world.translation.copy(), instance
 
 
 def frame_distance(focal_mm: float, frame_extent_m: float,
@@ -97,6 +121,71 @@ def focus_on_labeled_card(camera, camera_cfg, label_results):
     camera.data.dof.focus_distance = (
         camera.matrix_world.translation - instance.card.matrix_world.translation).length
     return instance
+
+
+def focus_on_card(camera, camera_cfg, instance):
+    """Set DoF to the card deliberately intersected by the center camera ray."""
+    camera.data.dof.use_dof = bool(camera_cfg.dof_enabled)
+    camera.data.dof.aperture_fstop = float(camera_cfg.aperture_fstop)
+    camera.data.dof.focus_object = instance.card
+    camera.data.dof.focus_distance = (
+        camera.matrix_world.translation - instance.card.matrix_world.translation).length
+    camera["tcg_focus_card_id"] = instance.card_id
+    return instance
+
+
+def _card_fully_contained(scene, camera, instance) -> bool:
+    half_w = config.CARD_W_M / 2.0
+    half_h = config.CARD_H_M / 2.0
+    z = config.CARD_T_M / 2.0
+    corners = ((-half_w, +half_h, z), (+half_w, +half_h, z),
+               (+half_w, -half_h, z), (-half_w, -half_h, z))
+    for corner in corners:
+        projected = world_to_camera_view(scene, camera, instance.card.matrix_world @ Vector(corner))
+        if projected.z <= 1e-6 or not (0.0 <= projected.x <= 1.0) \
+                or not (0.0 <= projected.y <= 1.0):
+            return False
+    return True
+
+
+def all_cards_fully_contained(scene, camera, instances) -> bool:
+    """Whether every card's ideal front rectangle is inside the camera frustum."""
+    return bool(instances) and all(
+        _card_fully_contained(scene, camera, instance) for instance in instances)
+
+
+def zoom_to_card_boundary(scene, camera, instances, rng,
+                          increment_mm: float = 4.0, max_increments: int = 10000) -> float:
+    """Increase lens zoom to the first card/frustum crossing, then roll back 0-2 steps.
+
+    A scene that already contains a partial or out-of-view card is left unchanged.
+    """
+    if increment_mm <= 0.0 or max_increments < 1:
+        raise ValueError("Camera zoom increments must be positive")
+    bpy.context.view_layer.update()
+    initial_lens = float(camera.data.lens)
+    camera["tcg_zoom_initial_mm"] = initial_lens
+    camera["tcg_zoom_increment_mm"] = float(increment_mm)
+    if not all_cards_fully_contained(scene, camera, instances):
+        camera["tcg_zoom_adjusted"] = False
+        camera["tcg_zoom_rollback"] = -1
+        return initial_lens
+
+    for _step in range(max_increments):
+        camera.data.lens = float(camera.data.lens) + increment_mm
+        bpy.context.view_layer.update()
+        if not all_cards_fully_contained(scene, camera, instances):
+            crossing_lens = float(camera.data.lens)
+            chance_no_rollback = int(rng.integers(0, 3))
+            rollback = int(rng.integers(1, 4)) if chance_no_rollback > 0 else 0
+            camera.data.lens = max(crossing_lens - rollback * increment_mm, initial_lens)
+            camera["tcg_zoom_adjusted"] = True
+            camera["tcg_zoom_crossing_mm"] = crossing_lens
+            camera["tcg_zoom_rollback"] = rollback
+            camera["tcg_zoom_final_mm"] = float(camera.data.lens)
+            bpy.context.view_layer.update()
+            return float(camera.data.lens)
+    raise RuntimeError("Camera zoom did not reach a card boundary")
 
 
 def remove_camera(camera) -> None:

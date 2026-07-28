@@ -72,6 +72,28 @@ def _pixel_melt(image: np.ndarray, blur_sigma: float, scale: float) -> np.ndarra
     return out
 
 
+def _motion_blur_kernel(direction_index: int, strength: float) -> np.ndarray:
+    """Build a center-weighted 7x7 trail kernel in one of 16 directions."""
+    if not isinstance(direction_index, (int, np.integer)) or not 0 <= direction_index < 16:
+        raise ValueError("motion-blur direction_index must be in [0, 15]")
+    strength = float(strength)
+    if not 0.0 <= strength <= 1.0:
+        raise ValueError("motion-blur strength must be in [0, 1]")
+    angle = 2.0 * np.pi * direction_index / 16.0
+    kernel = np.zeros((7, 7), dtype=np.float32)
+    kernel[3, 3] = 1.0 - strength
+    for distance in range(1, 4):
+        x = int(np.rint(distance * np.cos(angle)))
+        y = int(np.rint(distance * np.sin(angle)))
+        kernel[3 + y, 3 + x] += strength / 3.0
+    return kernel
+
+
+def _motion_blur(image: np.ndarray, direction_index: int, strength: float) -> np.ndarray:
+    kernel = _motion_blur_kernel(direction_index, strength)
+    return cv2.filter2D(image, -1, kernel, borderType=cv2.BORDER_REFLECT101)
+
+
 def _sensor_noise(image: np.ndarray, luma_sigma: float, chroma_sigma: float, seed: int) -> np.ndarray:
     rng = np.random.default_rng(seed)
     height, width = image.shape[:2]
@@ -111,7 +133,10 @@ def apply_postfx(image: np.ndarray, settings: "PostFxConfig") -> np.ndarray:
         out = np.clip((out - 0.5) * (1.0 - settings.contrast.reduction) + 0.5, 0.0, 1.0)
     if settings.chromatic_aberration is not None:
         out = _chromatic_aberration(out, settings.chromatic_aberration.shift_px,
-                                    settings.chromatic_aberration.angle_deg)
+                                     settings.chromatic_aberration.angle_deg)
+    if settings.motion_blur is not None:
+        out = _motion_blur(out, settings.motion_blur.direction_index,
+                           settings.motion_blur.strength)
     if settings.pixel_melt is not None:
         out = _pixel_melt(out, settings.pixel_melt.blur_sigma, settings.pixel_melt.scale)
     if settings.sensor_noise is not None:

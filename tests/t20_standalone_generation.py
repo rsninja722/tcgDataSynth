@@ -10,6 +10,7 @@ OUTPUT (out/):
     t20_standalone/images/000000_seed20260731.png
     t20_standalone/labels/000000_seed20260731.txt
     t20_standalone/manifest.jsonl
+    t20_standalone/refraction_failures.txt
     t20_standalone_report.json
 
 INTERACTIVE FOLLOW-UP:
@@ -33,6 +34,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 import config  # noqa: E402
+from blender import labeling  # noqa: E402
 from blender.generation_worker import run_one  # noqa: E402
 from rules.generation import resume_next_index  # noqa: E402
 
@@ -53,15 +55,41 @@ def main() -> None:
     with open(config_path, "w", encoding="utf-8") as handle:
         json.dump(test_config, handle, indent=2)
 
-    result = run_one(0, config_path=config_path, output_root=test_root)
+    original_projection = labeling._project_apparent_corner
+    injected = False
+
+    def inject_one_failure(*args, **kwargs):
+        nonlocal injected
+        if not injected:
+            injected = True
+            raise labeling.CornerProjectionError(
+                "forced t20 apparent-ray convergence failure")
+        return original_projection(*args, **kwargs)
+
+    labeling._project_apparent_corner = inject_one_failure
+    try:
+        result = run_one(0, config_path=config_path, output_root=test_root)
+    finally:
+        labeling._project_apparent_corner = original_projection
     output = config.OutputLayout(root=test_root)
     assert os.path.isfile(result["image"]) and os.path.isfile(result["label"])
+    assert injected and result["refraction_failure_count"] == 1
+    assert result["refraction_failures"] == os.path.abspath(
+        output.refraction_failures_path())
+    with open(result["refraction_failures"], encoding="utf-8") as handle:
+        failures = [json.loads(line) for line in handle if line.strip()]
+    assert len(failures) == 1
+    assert failures[0]["index"] == 0 and failures[0]["seed"] == 20260731
+    assert failures[0]["corner_name"] == "TL"
+    assert failures[0]["fallback"] == "direct-card-polygon"
+    assert "forced t20" in failures[0]["error"]
     assert resume_next_index(output, 20260731, 1) == 1
     report = {
         "blender_version": bpy.app.version_string,
         "worker_result": result,
         "resume_next_index": 1,
         "manifest": os.path.join(test_root, output.manifest_name),
+        "refraction_failures": failures,
     }
     report_path = os.path.join(out_root, "t20_standalone_report.json")
     with open(report_path, "w", encoding="utf-8") as handle:

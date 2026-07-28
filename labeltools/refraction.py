@@ -7,6 +7,7 @@ This module is bpy-free; Blender only converts marked objects into ``RefractiveB
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Sequence, Tuple
 
@@ -22,6 +23,10 @@ _EPS = 1e-9
 
 class RefractionError(RuntimeError):
     """Raised when an apparent ray cannot be solved without inventing a fallback."""
+
+
+class TotalInternalReflectionError(RefractionError):
+    """Raised when one optical trial has no transmitted Snell ray."""
 
 
 def _vec3(value: Sequence[float], name: str) -> np.ndarray:
@@ -93,7 +98,8 @@ def refract(direction: Sequence[float], incident_normal: Sequence[float],
     eta = float(n_from) / float(n_to)
     discriminant = 1.0 - eta * eta * (1.0 - cos_i * cos_i)
     if discriminant < -1e-12:
-        raise RefractionError("total internal reflection has no transmitted ray")
+        raise TotalInternalReflectionError(
+            "total internal reflection has no transmitted ray")
     out = eta * d + (eta * cos_i - np.sqrt(max(0.0, discriminant))) * normal
     return _unit(out, "refracted direction")
 
@@ -225,8 +231,14 @@ def solve_camera_ray(camera_origin: Sequence[float], target: Sequence[float],
     plane_normal = _unit(np.cross(x_axis, y_axis), "target plane normal")
     direct = _unit(point - camera, "camera-to-target direction")
 
-    initial = trace_to_plane(camera, direct, point, plane_normal, boxes)
-    if not initial.crossed:
+    try:
+        initial = trace_to_plane(camera, direct, point, plane_normal, boxes)
+    except TotalInternalReflectionError:
+        # A direct ray near a finite-box edge can enter one face and encounter total
+        # internal reflection at another. That invalid trial does not rule out a
+        # neighboring transmitted branch which enters/exits a different face pair.
+        initial = None
+    if initial is not None and not initial.crossed:
         return direct
 
     reference = np.array((0.0, 0.0, 1.0))
@@ -247,13 +259,29 @@ def solve_camera_ray(camera_origin: Sequence[float], target: Sequence[float],
     # A sharp finite-box edge separates front-entry and side-entry solution branches.
     # Seed Newton on the best nearby branch instead of assuming the unrefracted ray's
     # branch contains the apparent solution.
-    best_offset = offset
-    _best_candidate, best_residual = evaluate(offset)
-    best_size = float(np.linalg.norm(best_residual))
-    if float(np.linalg.norm(best_residual, ord=np.inf)) <= tolerance:
-        return _best_candidate
-    seed_directions = ((1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0))
-    for radius in (0.0025, 0.005, 0.01, 0.02):
+    best_offset = None
+    _best_candidate = best_residual = None
+    best_size = math.inf
+    try:
+        _best_candidate, best_residual = evaluate(offset)
+    except RefractionError:
+        pass
+    else:
+        best_offset = offset
+        best_size = float(np.linalg.norm(best_residual))
+        if float(np.linalg.norm(best_residual, ord=np.inf)) <= tolerance:
+            return _best_candidate
+
+    compass_directions = ((1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0))
+    if initial is None:
+        seed_directions = tuple(
+            (math.cos(index * math.pi / 8.0), math.sin(index * math.pi / 8.0))
+            for index in range(16))
+        seed_radii = (0.001, 0.0025, 0.005, 0.01, 0.02, 0.04, 0.08, 0.16)
+    else:
+        seed_directions = compass_directions
+        seed_radii = (0.0025, 0.005, 0.01, 0.02)
+    for radius in seed_radii:
         for seed_direction in seed_directions:
             seed = np.asarray(seed_direction, dtype=np.float64)
             seed *= radius / float(np.linalg.norm(seed))
@@ -265,6 +293,9 @@ def solve_camera_ray(camera_origin: Sequence[float], target: Sequence[float],
             if seed_size < best_size:
                 best_offset, best_size = seed, seed_size
                 _best_candidate, best_residual = _seed_candidate, seed_residual
+    if best_offset is None:
+        raise RefractionError(
+            "no transmitted camera-ray branch reaches the target plane")
     if float(np.linalg.norm(best_residual, ord=np.inf)) <= tolerance:
         return _best_candidate
     offset = best_offset
@@ -350,7 +381,7 @@ def solve_camera_ray(camera_origin: Sequence[float], target: Sequence[float],
             pattern_step = 0.005
             for _pattern_iteration in range(40):
                 improved = False
-                for pattern_direction in seed_directions:
+                for pattern_direction in compass_directions:
                     direction_2d = np.asarray(pattern_direction, dtype=np.float64)
                     direction_2d /= float(np.linalg.norm(direction_2d))
                     trial = pattern_offset + direction_2d * pattern_step

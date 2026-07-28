@@ -9,6 +9,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
+import config
 from texturegen import shadow_mask
 
 
@@ -24,7 +25,9 @@ class LightRig:
 
 _SHADOW_SIZE_MARGIN = 1.06
 _CAMERA_PLANE_EPSILON_M = 0.002
-SHADOW_OPACITY = 0.95
+SHADOW_OPACITY = config.DEFAULT_CONFIG["lighting"]["shadow_plane_opacity"]
+_SHADOW_SOFTNESS_SCALE = 1.2
+_SUN_SHADOW_ANGLE_RAD = math.radians(1.0)
 _SPOT_SOFT_SIZE_UNMASKED_M = 0.012
 _SPOT_SOFT_SIZE_MASKED_M = (0.012 + 0.025) / 2.0
 
@@ -69,9 +72,9 @@ def _new_light(name: str, kind: str, energy: float, color):
     return obj
 
 
-def _shadow_material():
+def _shadow_material(opacity: float):
     material = bpy.data.materials.new("Phase5ShadowMaskMat")
-    material.diffuse_color = (0.035, 0.04, 0.05, SHADOW_OPACITY)
+    material.diffuse_color = (0.035, 0.04, 0.05, opacity)
     material.use_nodes = True
     nodes = material.node_tree.nodes
     links = material.node_tree.links
@@ -80,14 +83,14 @@ def _shadow_material():
     bsdf.inputs["Roughness"].default_value = 0.8
     transparent = nodes.new("ShaderNodeBsdfTransparent")
     mix = nodes.new("ShaderNodeMixShader")
-    mix.inputs[0].default_value = SHADOW_OPACITY
+    mix.inputs[0].default_value = opacity
     output = nodes.get("Material Output")
     for link in list(output.inputs["Surface"].links):
         links.remove(link)
     links.new(transparent.outputs["BSDF"], mix.inputs[1])
     links.new(bsdf.outputs["BSDF"], mix.inputs[2])
     links.new(mix.outputs["Shader"], output.inputs["Surface"])
-    material["tcg_shadow_opacity"] = SHADOW_OPACITY
+    material["tcg_shadow_opacity"] = opacity
     return material
 
 
@@ -180,7 +183,7 @@ def _finite_shadow_transform(source, camera, target, visible_radius,
 
 
 def _new_shadow_plane(name: str, seed: int, source_kind: str, source_index: int,
-                      transform, material, solid: bool = False):
+                       transform, material, opacity: float, solid: bool = False):
     center, normal, axis_x, axis_y, half_size, placement, source_fraction = transform
     retained = (np.ones((shadow_mask.GRID_FACES, shadow_mask.GRID_FACES), dtype=bool)
                 if solid else shadow_mask.retained_faces(seed))
@@ -207,7 +210,7 @@ def _new_shadow_plane(name: str, seed: int, source_kind: str, source_index: int,
     obj["tcg_shadow_placement"] = placement
     obj["tcg_shadow_source_fraction"] = float(source_fraction)
     obj["tcg_shadow_solid_control"] = bool(solid)
-    obj["tcg_shadow_opacity"] = SHADOW_OPACITY
+    obj["tcg_shadow_opacity"] = opacity
 
     if not hasattr(obj, "visible_camera") or not hasattr(obj, "visible_shadow"):
         raise RuntimeError("Blender object ray visibility is required for shadow masks")
@@ -240,6 +243,7 @@ def build_lighting(lighting_cfg, camera, target, subject_extent_m: float,
         + front * math.sin(elevation)
     ).normalized()
     sun = _new_light("Phase5Sun", "SUN", lighting_cfg.sun_energy, (1.0, 0.97, 0.92))
+    sun.data.angle = _SUN_SHADOW_ANGLE_RAD
     sun.location = target + source_direction * max(subject_extent_m, 0.2)
     sun.rotation_euler = (-source_direction).to_track_quat("-Z", "Y").to_euler()
     front_dot = float(source_direction.dot(front))
@@ -256,7 +260,7 @@ def build_lighting(lighting_cfg, camera, target, subject_extent_m: float,
         spotlight.data.shadow_soft_size = (
             _SPOT_SOFT_SIZE_MASKED_M
             if lighting_cfg.spotlight_shadow_mask_seed is not None
-            else _SPOT_SOFT_SIZE_UNMASKED_M)
+            else _SPOT_SOFT_SIZE_UNMASKED_M) * _SHADOW_SOFTNESS_SCALE
         spotlight.location = camera.matrix_world.translation + right * 0.035 + up * 0.015
         _aim_minus_z(spotlight, target)
         objects.append(spotlight)
@@ -270,9 +274,11 @@ def build_lighting(lighting_cfg, camera, target, subject_extent_m: float,
         if point_cfg.shadow_mask_seed is not None:
             old_soft_size = max(0.005, subject_extent_m * 0.025)
             current_soft_size = max(0.012, subject_extent_m * 0.05)
-            point.data.shadow_soft_size = (old_soft_size + current_soft_size) / 2.0
+            point.data.shadow_soft_size = (
+                (old_soft_size + current_soft_size) / 2.0) * _SHADOW_SOFTNESS_SCALE
         else:
-            point.data.shadow_soft_size = max(0.005, subject_extent_m * 0.025)
+            point.data.shadow_soft_size = (
+                max(0.005, subject_extent_m * 0.025) * _SHADOW_SOFTNESS_SCALE)
         point["tcg_color_temp"] = float(point_cfg.color_temp)
         point["tcg_front_dot"] = float((point.location - target).dot(front))
         points.append(point)
@@ -290,7 +296,8 @@ def build_lighting(lighting_cfg, camera, target, subject_extent_m: float,
                                point.location, point.data.shadow_soft_size))
 
     if mask_specs:
-        material = _shadow_material()
+        opacity = float(lighting_cfg.shadow_plane_opacity)
+        material = _shadow_material(opacity)
         materials.append(material)
         visible_radius = _visible_scene_radius(camera, target, subject_extent_m)
         for source_kind, source_index, seed, source_location, source_radius in mask_specs:
@@ -299,7 +306,7 @@ def build_lighting(lighting_cfg, camera, target, subject_extent_m: float,
                 source_radius)
             occluder = _new_shadow_plane(
                 f"Phase5ShadowMask_{source_kind}_{source_index}", seed,
-                source_kind, source_index, transform, material,
+                source_kind, source_index, transform, material, opacity,
                 solid=solid_shadow_masks)
             occluders.append(occluder)
             objects.append(occluder)

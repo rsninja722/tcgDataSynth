@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 
 _ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _ROOT not in sys.path:
@@ -182,6 +183,23 @@ def test_display_case_only_toploader_or_slab():
         assert kinds <= {"toploader", "slab"}, kinds
 
 
+def test_display_case_camera_is_at_most_30_degrees_from_straight_down():
+    for seed in range(200):
+        cfg = _sample(seed, layouts=["display_case"])
+        assert 0.0 <= cfg.camera.offaxis_deg <= 30.0
+
+
+def test_layout_camera_offaxis_maximum_can_be_configured():
+    import tempfile
+    with tempfile.TemporaryDirectory() as directory:
+        path = os.path.join(directory, "config.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"layouts": {"table": {"camera_max_offaxis_deg": 7.0}}}, handle)
+        for seed in range(50):
+            cfg = C.sample_scene_config({"layouts": ["table"]}, seed, config_path=path)
+            assert 0.0 <= cfg.camera.offaxis_deg <= 7.0
+
+
 def test_display_case_capped_at_24_cards():
     seen_max = 0
     for seed in range(300):
@@ -309,6 +327,27 @@ def test_lighting_camera_ranges_and_focus_candidate():
         assert camera.dof_enabled is True
         assert C.CAMERA_FSTOP_RANGE[0] <= camera.aperture_fstop <= C.CAMERA_FSTOP_RANGE[1]
         assert any(not card.back_to_camera for card in cfg.cards)
+
+
+def test_runtime_config_controls_fstop_shadow_opacity_and_motion_blur():
+    with tempfile.TemporaryDirectory() as directory:
+        path = os.path.join(directory, "config.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({
+                "camera": {"aperture_fstop_range": [2.4, 2.4]},
+                "lighting": {"shadow_plane_opacity": 0.42},
+                "postfx": {"motion_blur": {
+                    "probability": 1.0, "strength_range": [0.17, 0.17]}},
+            }, handle)
+        cfg = C.sample_scene_config(
+            {"layouts": ["table"], "post_effects": ["motion_blur"]},
+            991, config_path=path)
+        assert cfg.camera.aperture_fstop == 2.4
+        assert cfg.lighting.shadow_plane_opacity == 0.42
+        assert cfg.postfx.motion_blur is not None
+        assert cfg.postfx.motion_blur.strength == 0.17
+        assert 0 <= cfg.postfx.motion_blur.direction_index < 16
+        C.validate_scene_config(cfg)
 
 
 def test_point_energy_max_reduces_for_two_and_three_lights():
