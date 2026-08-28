@@ -1,13 +1,14 @@
 {
   "_comment": "Central tuning config for tcgDataSynth. Edit and re-run; scripts read this at runtime. Each scene type has its OWN params under 'layouts'.",
   "blender_executable": "C:\\Program Files\\Blender Foundation\\Blender 5.0\\blender.exe",
+  "table_texture_dir": "",
   "holo": {
     "_comment": "Holo diffraction-flash. angle_gain: flash-band motion vs view angle. pattern_gain: spatial break-up. sharpness: flash threshold. emit: peak flash brightness. darken: base darkening between flashes.",
     "angle_gain": 12.0,
     "pattern_gain": 4.0,
     "sharpness": 4.0,
-    "emit": 1.6,
-    "darken": 0.18
+    "emit": 0.8,
+    "darken": 0.09
   },
   "camera": {
     "_comment": "Range of f-stop values sampled for depth of field.",
@@ -18,7 +19,7 @@
   },
   "lighting": {
     "_comment": "shadow_plane_opacity controls attenuation from generated shadow masks (0=transparent, 1=opaque).",
-    "shadow_plane_opacity": 0.90
+    "shadow_plane_opacity": 0.9
   },
   "postfx": {
     "_comment": "Each effect is independently sampled. probability is its per-image enable chance; every *_range is [minimum, maximum].",
@@ -103,15 +104,16 @@
     }
   },
   "generation": {
-    "count": 50,
-    "base_seed": 345435,
+    "count": 2000,
+    "base_seed": 1660,
+    "export_yolo_segmentation": false,
     "enabled_options": {
       "layouts": [
         "table",
         "floating",
         "binder",
-        "display_case",
-        "hand"
+        "hand",
+        "stack"
       ],
       "protections": [
         "none",
@@ -133,7 +135,6 @@
         "holo"
       ],
       "holo_regions": [
-        "entire",
         "picture",
         "reverse"
       ],
@@ -152,8 +153,7 @@
       "binder_grids": [
         "1x1",
         "2x2",
-        "3x3",
-        "4x3"
+        "3x3"
       ],
       "binder_contents": [
         "sleeved",
@@ -176,7 +176,8 @@
         "haze",
         "motion_blur"
       ],
-      "back_to_camera_prob": 0.05
+      "back_to_camera_prob": 0.05,
+      "cardless_scene_prob": 0.0
     }
   },
   "layouts": {
@@ -210,6 +211,12 @@
     "hand": {
       "_comment": "One card in a side or pinch grip. out_of_frustum: keep|remove.",
       "max_cards": 1,
+      "out_of_frustum": "keep",
+      "camera_max_offaxis_deg": 50.0
+    },
+    "stack": {
+      "_comment": "One to ten uniformly protected cards in a near-touching stack above a textured table.",
+      "max_cards": 10,
       "out_of_frustum": "keep",
       "camera_max_offaxis_deg": 50.0
     }

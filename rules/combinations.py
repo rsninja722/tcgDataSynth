@@ -25,7 +25,7 @@ import config as project_config
 # --------------------------------------------------------------------------- #
 # Option value vocabularies (the GUI toggles enable/disable these)
 # --------------------------------------------------------------------------- #
-LAYOUTS = ("table", "floating", "binder", "display_case", "hand")
+LAYOUTS = ("table", "floating", "binder", "display_case", "hand", "stack")
 PROTECTIONS = ("none", "sleeve", "semi_rigid", "toploader", "slab")
 SLEEVE_TYPES = ("clear", "opaque_back")
 SLEEVE_SIZES = ("1mm", "2.5mm")
@@ -76,6 +76,7 @@ _LAYOUT_PROTECTIONS: Dict[str, tuple] = {
     "floating": PROTECTIONS,                    # anything
     "display_case": ("toploader", "slab"),      # tight grid of toploadered/slabbed
     "hand": ("none", "sleeve", "toploader"),    # side grip: sleeved/toploadered; pinch: also bare
+    "stack": ("none", "sleeve", "toploader"),
     # binder is handled specially: its content_type fixes the protection.
 }
 _BINDER_CONTENT_PROTECTION = {"sleeved": "sleeve", "toploader": "toploader", "slab": "slab"}
@@ -234,6 +235,7 @@ class SceneConfig:
     lighting: LightingConfig
     camera: CameraConfig
     postfx: PostFxConfig
+    cardless: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -263,6 +265,7 @@ def default_enabled_options() -> Dict[str, Any]:
         "lighting": {"spotlight": True, "point_lights": True, "occluders": True},
         "post_effects": list(POST_EFFECTS),
         "back_to_camera_prob": 0.15,  # chance a given card faces away (table/floating)
+        "cardless_scene_prob": 0.0,
     }
 
 
@@ -395,6 +398,8 @@ def _sample_layout_and_cards(rng, opts):
         return _display_case(rng, opts)
     if kind == "hand":
         return _hand(rng, opts)
+    if kind == "stack":
+        return _stack(rng, opts)
     return _loose(rng, opts, kind)  # table / floating
 
 
@@ -462,16 +467,13 @@ def sample_top_card(rng, enabled_options=None) -> CardConfig:
     return _make_card(rng, opts, slot_index=-1, protection_kind=kind, allow_back=False)
 
 
-def _hand(rng, opts):
-    allowed = _allowed_protections_for_layout("hand", opts)
-    protection_kind = _choice(rng, allowed)
+def _hand_params(rng, protection_kind):
     # Bare card => pinch grip only; sleeved/toploadered => either grip.
     if protection_kind == "none":
         grip = "pinch"
     else:
         grip = _choice(rng, HAND_GRIPS)
-    card = _make_card(rng, opts, 0, protection_kind, allow_back=False)
-    params = {
+    return {
         "grip": grip,
         "handedness": _choice(rng, HAND_SIDES),
         "approach_deg": float(rng.uniform(0.0, 360.0)),
@@ -479,7 +481,39 @@ def _hand(rng, opts):
         # protection boundary. This is dimensionless, not a world-space distance.
         "depth": float(rng.uniform(*HAND_DEPTH_RANGE)),
     }
+
+
+def _hand(rng, opts):
+    allowed = _allowed_protections_for_layout("hand", opts)
+    protection_kind = _choice(rng, allowed)
+    card = _make_card(rng, opts, 0, protection_kind, allow_back=False)
+    params = _hand_params(rng, protection_kind)
     return LayoutConfig("hand", params), [card]
+
+
+def _stack(rng, opts):
+    """Sample a uniformly protected, nearly aligned vertical card stack."""
+    protection_kind = _choice(rng, _allowed_protections_for_layout("stack", opts))
+    count = int(rng.integers(1, 11))
+    cards = [_make_card(rng, opts, index, protection_kind, allow_back=False)
+             for index in range(count)]
+    offsets = [
+        {
+            "x_frac": float(rng.uniform(-0.05, 0.05)),
+            "y_frac": float(rng.uniform(-0.05, 0.05)),
+            "rotation_deg": float(rng.uniform(-5.0, 5.0)),
+        }
+        for _card in cards[:-1]
+    ]
+    offsets.append({"x_frac": 0.0, "y_frac": 0.0, "rotation_deg": 0.0})
+    with_hand = _maybe(rng, 0.25)
+    params = {
+        "table_clearance_m": float(rng.uniform(0.0, 0.10)),
+        "offsets": offsets,
+        "with_hand": with_hand,
+        "hand": _hand_params(rng, protection_kind) if with_hand else None,
+    }
+    return LayoutConfig("stack", params), cards
 
 
 def _loose(rng, opts, kind):
@@ -650,18 +684,24 @@ def sample_scene_config(enabled_options: Optional[Dict[str, Any]], rng_seed: int
     opts = _resolve(enabled_options)
     rng = np.random.default_rng(rng_seed) if rng is None else rng
     layout, cards = _sample_layout_and_cards(rng, opts)
-    if max_cards is not None and len(cards) > max_cards:
-        cards = cards[:int(max_cards)]
+    runtime_tuning = project_config.load_config(config_path)
+    configured_max = int(runtime_tuning["layouts"][layout.kind]["max_cards"])
+    card_cap = configured_max if max_cards is None else min(configured_max, int(max_cards))
+    if len(cards) > card_cap:
+        cards = cards[:card_cap]
         if layout.kind == "binder":
             layout.params["filled_slots"] = layout.params["filled_slots"][:len(cards)]
         elif layout.kind == "display_case":
             cols = int(layout.params["cols"])
             layout.params["rows"] = (len(cards) + cols - 1) // cols
+        elif layout.kind == "stack":
+            layout.params["offsets"] = layout.params["offsets"][:len(cards)]
+            layout.params["offsets"][-1] = {
+                "x_frac": 0.0, "y_frac": 0.0, "rotation_deg": 0.0}
     # Apply this after external truncation so the retained prefix always contains a
     # potential camera/DoF focus target.
     if all(card.back_to_camera for card in cards):
         cards[0].back_to_camera = False
-    runtime_tuning = project_config.load_config(config_path)
     max_offaxis_deg = float(
         runtime_tuning["layouts"][layout.kind]["camera_max_offaxis_deg"])
     cfg = SceneConfig(
@@ -671,6 +711,7 @@ def sample_scene_config(enabled_options: Optional[Dict[str, Any]], rng_seed: int
         lighting=_sample_lighting(rng, opts, runtime_tuning["lighting"]),
         camera=_sample_camera(rng, opts, runtime_tuning["camera"], max_offaxis_deg),
         postfx=_sample_postfx(rng, opts, runtime_tuning["postfx"]),
+        cardless=_maybe(rng, float(opts.get("cardless_scene_prob", 0.0))),
     )
     validate_scene_config(cfg)  # never emit an illegal config
     return cfg
@@ -680,6 +721,7 @@ def validate_scene_config(cfg: SceneConfig) -> None:
     """Assert every combination rule holds. Raises AssertionError on violation."""
     assert cfg.layout.kind in LAYOUTS, cfg.layout.kind
     assert len(cfg.cards) >= 1, "scene must have >=1 card"
+    assert isinstance(cfg.cardless, bool)
 
     for c in cfg.cards:
         p = c.protection
@@ -739,6 +781,27 @@ def validate_scene_config(cfg: SceneConfig) -> None:
         depth = float(cfg.layout.params.get("depth", -1.0))
         assert 0.0 <= approach < 360.0
         assert HAND_DEPTH_RANGE[0] <= depth <= HAND_DEPTH_RANGE[1]
+    elif lk == "stack":
+        assert 1 <= len(cfg.cards) <= 10
+        assert kinds <= {"none", "sleeve", "toploader"}, f"stack has {kinds}"
+        assert len(kinds) == 1, "all cards in a stack must use one protection kind"
+        offsets = cfg.layout.params.get("offsets", [])
+        assert len(offsets) == len(cfg.cards)
+        for offset in offsets:
+            assert abs(float(offset["x_frac"])) <= 0.05
+            assert abs(float(offset["y_frac"])) <= 0.05
+            assert abs(float(offset["rotation_deg"])) <= 5.0
+        assert 0.0 <= float(cfg.layout.params.get("table_clearance_m", -1.0)) <= 0.10
+        with_hand = cfg.layout.params.get("with_hand")
+        assert isinstance(with_hand, bool)
+        if with_hand:
+            hand = cfg.layout.params.get("hand") or {}
+            assert hand.get("grip") in HAND_GRIPS
+            assert hand.get("handedness") in HAND_SIDES
+            assert 0.0 <= float(hand.get("approach_deg", -1.0)) < 360.0
+            assert HAND_DEPTH_RANGE[0] <= float(hand.get("depth", -1.0)) <= HAND_DEPTH_RANGE[1]
+            if next(iter(kinds)) == "none":
+                assert hand["grip"] == "pinch"
     elif lk == "binder":
         content = cfg.layout.params["content_type"]
         expected = _BINDER_CONTENT_PROTECTION[content]

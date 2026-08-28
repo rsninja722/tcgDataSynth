@@ -43,7 +43,8 @@ def subject_extent_from_target(instances, target) -> float:
 
 def random_focus_target(instances, rng):
     """Choose a front-facing configured card and return its center and instance."""
-    candidates = [instance for instance in instances if not instance.back_to_camera]
+    candidates = [instance for instance in instances
+                  if not instance.back_to_camera and instance.label_enabled]
     if not candidates:
         raise RuntimeError("Camera focus requires a front-facing card instance")
     instance = candidates[int(rng.integers(0, len(candidates)))]
@@ -177,7 +178,7 @@ def zoom_to_card_boundary(scene, camera, instances, rng,
         if not all_cards_fully_contained(scene, camera, instances):
             crossing_lens = float(camera.data.lens)
             chance_no_rollback = int(rng.integers(0, 3))
-            rollback = int(rng.integers(1, 4)) if chance_no_rollback > 0 else 0
+            rollback = int(rng.integers(2, 5)) if chance_no_rollback > 0 else -2
             camera.data.lens = max(crossing_lens - rollback * increment_mm, initial_lens)
             camera["tcg_zoom_adjusted"] = True
             camera["tcg_zoom_crossing_mm"] = crossing_lens

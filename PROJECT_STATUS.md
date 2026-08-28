@@ -1,10 +1,10 @@
 # Project Status
 
-Last consolidated: 2026-07-27.
+Last consolidated: 2026-08-28.
 
 ## Active Checkpoint
 
-version 1 complete
+Requested dataset-generation extensions implemented; Blender t22 acceptance pending.
 
 ## Locked Decisions
 
@@ -57,12 +57,20 @@ version 1 complete
   scenes already containing a partial/out-of-view card keep their initial zoom.
 - Sun, point, and phone-flash emitter sizes were increased modestly to soften shadow
   edges. Shadow masks retain their accepted placement and 50x50 breakup geometry.
+- Optional standard YOLO segmentation collapses full/partial cards to class 0 and writes
+  synchronized identity/holo metadata under `extra_label`.
+- Table-bearing layouts use a configured image directory, choosing 50/50 between a
+  single image and a four-image 2x2 material with a smooth 5% seam overlap.
+- Stack scenes contain 1-10 uniformly protected cards; only the top card is labelable,
+  and a hand is sampled around it with 25% probability.
+- A single GUI probability controls intentional cardless variants for every layout.
+- Each standalone worker removes `out/card_cache` in a `finally` block.
 
 ## Active Label Contract
 
-The user selected an occlusion-aware custom polygon label during Phase 4. It supersedes fixed YOLO-pose labels for current layout scripts. Full details are in `LABEL_FORMAT.md`.
-
-This is a project blocker before Phase 8: the custom format cannot be passed directly to Ultralytics. Choose a custom trainer/adapter or define a supported export representation before generating the pilot dataset.
+The occlusion-aware custom polygon remains the primary label. A selectable standard
+YOLO segmentation export now writes class-0 polygons plus positional identity/holo
+metadata in a sibling directory. Full details are in `LABEL_FORMAT.md`.
 
 ## Known Risks
 
@@ -89,10 +97,13 @@ This is a project blocker before Phase 8: the custom format cannot be passed dir
   positions and sun angles are interpreted in a camera-relative front-hemisphere basis.
 - The final t17 shadow shape and midpoint placement were visually accepted by the user
   under Blender 5.0.0. The later configurable opacity/softness touch-up awaits t21 review.
-- Container validation for the project-wide touch-up passes all 148 unit tests,
+- Container validation passes all 157 unit tests,
   `compileall`, and `git diff --check`.
 - The t21 Blender 5.0 touch-up acceptance script has not yet been run in this container,
   which has no Blender.
 - Some older numbered test headers describe historical implementations. Treat current source and this status as authoritative; update a script when it becomes the active acceptance test.
+- The container has no Blender. The integrated stack, image-texture shader, cardless
+  geometry, YOLO publication, and cache cleanup await `tests/t22_requested_features.py`
+  under Blender 5.0.0.
 
 ## Next Goals

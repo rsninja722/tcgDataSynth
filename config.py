@@ -126,8 +126,8 @@ class OutputLayout:
     root: str = "out"
     images_subdir: str = "images"
     labels_subdir: str = "labels"
-    # Optional sibling folder for strictly-standard labels (no |id suffix), spec §3.9.
-    std_labels_subdir: str = "labels_standard"
+    yolo_labels_subdir: str = "labels_yolo"
+    extra_labels_subdir: str = "extra_label"
     manifest_name: str = "manifest.jsonl"
     refraction_failures_name: str = "refraction_failures.txt"
 
@@ -137,8 +137,11 @@ class OutputLayout:
     def labels_dir(self) -> str:
         return os.path.join(self.root, self.labels_subdir)
 
-    def std_labels_dir(self) -> str:
-        return os.path.join(self.root, self.std_labels_subdir)
+    def yolo_labels_dir(self) -> str:
+        return os.path.join(self.root, self.yolo_labels_subdir)
+
+    def extra_labels_dir(self) -> str:
+        return os.path.join(self.root, self.extra_labels_subdir)
 
     def refraction_failures_path(self) -> str:
         return os.path.join(self.root, self.refraction_failures_name)
@@ -154,6 +157,7 @@ OUTPUT = OutputLayout()
 CONFIG_FILENAME = "config.json"
 DEFAULT_CONFIG = {
     "blender_executable": r"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe",
+    "table_texture_dir": "",
     "holo": {
         "angle_gain": 12.0,    # flash-band motion speed vs view angle
         "pattern_gain": 4.0,   # spatial break-up of the flash phase by the pattern
@@ -216,8 +220,9 @@ DEFAULT_CONFIG = {
     "generation": {
         "count": 10,
         "base_seed": 20260731,
+        "export_yolo_segmentation": False,
         "enabled_options": {
-            "layouts": ["table", "floating", "binder", "display_case", "hand"],
+            "layouts": ["table", "floating", "binder", "display_case", "hand", "stack"],
             "protections": ["none", "sleeve", "semi_rigid", "toploader", "slab"],
             "sleeve_types": ["clear", "opaque_back"],
             "sleeve_sizes": ["1mm", "2.5mm"],
@@ -233,6 +238,7 @@ DEFAULT_CONFIG = {
                              "tint", "chromatic_aberration", "contrast", "haze",
                              "motion_blur"],
             "back_to_camera_prob": 0.15,
+            "cardless_scene_prob": 0.0,
         },
     },
     # Per-layout scene params (each scene type has its OWN set). Add entries here as
@@ -247,7 +253,9 @@ DEFAULT_CONFIG = {
         "display_case": {"max_cards": 24, "out_of_frustum": "keep",
                          "camera_max_offaxis_deg": 30.0},
         "hand": {"max_cards": 1, "out_of_frustum": "keep",
-                 "camera_max_offaxis_deg": 50.0},
+                  "camera_max_offaxis_deg": 50.0},
+        "stack": {"max_cards": 10, "out_of_frustum": "keep",
+                  "camera_max_offaxis_deg": 50.0},
     },
 }
 # Back-compat alias (used by tests / older references).
@@ -350,6 +358,10 @@ def _validated_generation(settings: dict) -> dict:
         out["count"] = defaults["count"]
     if not 0 <= out["base_seed"] <= GENERATION_SEED_MAX - out["count"]:
         out["base_seed"] = defaults["base_seed"]
+    export_yolo = settings.get(
+        "export_yolo_segmentation", defaults["export_yolo_segmentation"])
+    out["export_yolo_segmentation"] = (
+        export_yolo if isinstance(export_yolo, bool) else defaults["export_yolo_segmentation"])
 
     supplied = settings.get("enabled_options", {})
     supplied = supplied if isinstance(supplied, dict) else {}
@@ -377,12 +389,18 @@ def _validated_generation(settings: dict) -> dict:
 
 def _coerce(default_val, new):
     if isinstance(default_val, bool):
-        return bool(new)
+        if isinstance(new, bool):
+            return new
+        if isinstance(new, (int, float)) and new in (0, 1):
+            return bool(new)
+        return default_val
     if isinstance(default_val, int) and not isinstance(default_val, bool):
         return int(new)
     if isinstance(default_val, float):
         return float(new)
-    return new  # string
+    if isinstance(default_val, str):
+        return new if isinstance(new, str) else default_val
+    return new
 
 
 def _deep_merge(defaults: dict, raw) -> dict:
@@ -421,6 +439,9 @@ def load_config(path: str = None) -> dict:
     cfg["postfx"] = _validated_postfx_tuning(cfg["postfx"])
     cfg["generation"] = _validated_generation(cfg["generation"])
     for name, lp in cfg.get("layouts", {}).items():
+        if not isinstance(lp.get("max_cards"), int) or isinstance(lp.get("max_cards"), bool) \
+                or lp["max_cards"] < 1:
+            lp["max_cards"] = DEFAULT_CONFIG["layouts"][name]["max_cards"]
         if lp.get("out_of_frustum") not in _OUT_OF_FRUSTUM_CHOICES:
             lp["out_of_frustum"] = "keep"
         maximum = lp.get("camera_max_offaxis_deg")
@@ -467,6 +488,16 @@ def load_blender_executable(path: str = None) -> str:
     return str(load_config(path)["blender_executable"])
 
 
+def load_table_texture_dir(path: str = None) -> str:
+    """Configured image directory used for table surface textures."""
+    value = str(load_config(path)["table_texture_dir"]).strip()
+    if not value or os.path.isabs(value):
+        return value
+    base = os.path.dirname(os.path.abspath(path)) if path else os.path.dirname(
+        os.path.abspath(__file__))
+    return os.path.abspath(os.path.join(base, value))
+
+
 def _read_raw_config(path: str) -> dict:
     if os.path.isfile(path):
         try:
@@ -506,4 +537,15 @@ def save_blender_executable(executable: str, path: str = None) -> None:
         raise ValueError("Blender executable path must be a non-empty string")
     raw = _read_raw_config(path)
     raw["blender_executable"] = executable.strip()
+    _write_raw_config(path, raw)
+
+
+def save_table_texture_dir(directory: str, path: str = None) -> None:
+    """Atomically persist the table texture image directory."""
+    if path is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILENAME)
+    if not isinstance(directory, str):
+        raise ValueError("Table texture directory must be a string")
+    raw = _read_raw_config(path)
+    raw["table_texture_dir"] = directory.strip()
     _write_raw_config(path, raw)

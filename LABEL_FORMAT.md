@@ -63,6 +63,32 @@ Current representation limits:
 - If carving creates disconnected components, only the largest is retained.
 - Occluder ordering uses mean projected depth, not per-pixel depth.
 
+## YOLO Segmentation Export
+
+When `generation.export_yolo_segmentation` is enabled, each custom label also emits a
+standard YOLO segmentation row in `out/labels_yolo/<stem>.txt`:
+
+```text
+0 <x1> <y1> <x2> <y2> ... <xn> <yn>
+```
+
+Both full and partial custom classes become class `0`. Point flags, explicit bounding
+values, card IDs, and holo tags are omitted from the YOLO row. The ordered points define
+the segment mask; YOLO derives the bounding box from their min/max envelope, equal to the
+custom label's `<x_min> <y_min> <x_max> <y_max>` values.
+
+The matching `out/extra_label/<stem>.txt` contains one line per YOLO instance:
+
+```text
+<card_id>|<holo_tag>
+```
+
+Line order and line counts are identical across the YOLO and extra-label files. A scene
+with no labeled cards writes two empty files. The custom single-ring limitations above
+also apply to rasterization of the YOLO polygon, including zero-width bridges for holes.
+
+Implementation: `labeltools/yolo_segmentation.py`.
+
 ## Legacy Pose Format
 
 `CardLabel`, `write_label_file()`, and `write_dataset_yaml()` implement the earlier fixed-corner pose path:

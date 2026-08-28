@@ -188,6 +188,9 @@ def label_scene(scene, cam, instances, area_frac: float = 0.25,
     results = []
     for i, inst in enumerate(instances):
         ndc, fv, depth = projected[i]
+        if not inst.label_enabled:
+            results.append((inst, None, "label-disabled"))
+            continue
         occluders = [q for j, ql in enumerate(occ_quads) if j != i for q in ql]
         pts, cls, reason = compute_bound(
             inst.card_id, ndc, fv, occluders=occluders,

@@ -18,12 +18,13 @@ def test_project_config_json_loads():
     assert set(cfg) == set(config.DEFAULT_CONFIG)
     assert set(cfg["holo"]) == set(config.DEFAULT_CONFIG["holo"])
     assert set(cfg["postfx"]) == set(config.DEFAULT_CONFIG["postfx"])
-    assert cfg["camera"]["aperture_fstop_range"] == [1.8, 8.0]
-    assert cfg["lighting"]["shadow_plane_opacity"] == 0.95
+    assert cfg["camera"]["aperture_fstop_range"] == [8.0, 20.0]
+    assert cfg["lighting"]["shadow_plane_opacity"] == 0.9
     # per-layout sections
     assert "table" in cfg["layouts"] and "floating" in cfg["layouts"]
     assert config.load_layout_params("hand")["max_cards"] == 1
     assert config.load_layout_params("display_case")["camera_max_offaxis_deg"] == 30.0
+    assert config.load_layout_params("stack")["max_cards"] == 10
     assert "max_shapes" in config.load_layout_params("floating")
     assert config.load_holo_tuning()["angle_gain"] == cfg["holo"]["angle_gain"]
     assert config.load_layout_params("table")["max_cards"] == cfg["layouts"]["table"]["max_cards"]
@@ -87,6 +88,10 @@ def test_layout_camera_offaxis_maximum_is_validated():
         assert cfg["layouts"]["table"]["camera_max_offaxis_deg"] == 12.5
         assert cfg["layouts"]["display_case"]["camera_max_offaxis_deg"] == 30.0
 
+        with open(p, "w") as fh:
+            json.dump({"layouts": {"stack": {"max_cards": 0}}}, fh)
+        assert config.load_layout_params("stack", p)["max_cards"] == 10
+
 
 def test_missing_and_malformed_fall_back():
     assert config.load_config("/no/such/file.json") == config.DEFAULT_CONFIG
@@ -145,7 +150,9 @@ def test_generation_settings_are_validated_and_persisted():
                     "protections": [],
                     "lighting": {"spotlight": 0, "point_lights": 1},
                     "back_to_camera_prob": 2.0,
+                    "cardless_scene_prob": -1.0,
                 },
+                "export_yolo_segmentation": 1,
             }}, fh)
         generation = config.load_generation_settings(p)
         assert generation["count"] == 3 and generation["base_seed"] == 99
@@ -154,12 +161,18 @@ def test_generation_settings_are_validated_and_persisted():
         assert generation["enabled_options"]["lighting"] == {
             "spotlight": False, "point_lights": True, "occluders": True}
         assert generation["enabled_options"]["back_to_camera_prob"] == 1.0
+        assert generation["enabled_options"]["cardless_scene_prob"] == 0.0
+        assert generation["export_yolo_segmentation"] is True
 
         config.save_generation_settings(generation, p)
         with open(p) as fh:
             saved = json.load(fh)
         assert saved["keep"] == "this"
         assert config.load_generation_settings(p) == generation
+
+        with open(p, "w") as fh:
+            json.dump({"generation": {"export_yolo_segmentation": "false"}}, fh)
+        assert config.load_generation_settings(p)["export_yolo_segmentation"] is False
 
 
 def test_blender_executable_is_persisted_separately_from_generation_settings():
@@ -171,6 +184,16 @@ def test_blender_executable_is_persisted_separately_from_generation_settings():
         config.save_blender_executable(executable, p)
         assert config.load_blender_executable(p) == executable
         assert config.load_generation_settings(p)["count"] == 2
+
+
+def test_table_texture_directory_is_persisted_and_relative_to_config():
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "config.json")
+        config.save_generation_settings({"count": 1, "base_seed": 1}, p)
+        config.save_table_texture_dir("textures", p)
+        assert config.load_table_texture_dir(p) == os.path.join(d, "textures")
+        with open(p, encoding="utf-8") as handle:
+            assert json.load(handle)["table_texture_dir"] == "textures"
 
 
 def _run_all():

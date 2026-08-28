@@ -15,6 +15,7 @@ _ROOT = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
+import config  # noqa: E402
 from rules import combinations as C  # noqa: E402
 
 
@@ -260,6 +261,33 @@ def test_hand_validation_rejects_illegal_manual_config():
         raise AssertionError("invalid hand depth must be rejected")
 
 
+def test_stack_has_uniform_protection_bounded_offsets_and_optional_hand():
+    hand_count = 0
+    for seed in range(500):
+        cfg = _sample(seed, layouts=["stack"])
+        assert 1 <= len(cfg.cards) <= 10
+        assert len({card.protection.kind for card in cfg.cards}) == 1
+        assert cfg.cards[-1].back_to_camera is False
+        assert len(cfg.layout.params["offsets"]) == len(cfg.cards)
+        assert cfg.layout.params["offsets"][-1] == {
+            "x_frac": 0.0, "y_frac": 0.0, "rotation_deg": 0.0}
+        assert 0.0 <= cfg.layout.params["table_clearance_m"] <= 0.10
+        hand_count += cfg.layout.params["with_hand"]
+        C.validate_scene_config(cfg)
+    assert 0.20 <= hand_count / 500 <= 0.30
+
+
+def test_cardless_probability_applies_to_every_layout_without_erasing_scene_plan():
+    for layout in C.LAYOUTS:
+        options = {"layouts": [layout], "cardless_scene_prob": 1.0}
+        cfg = C.sample_scene_config(options, 1234)
+        assert cfg.cardless is True
+        assert cfg.cards
+        C.validate_scene_config(cfg)
+    assert C.sample_scene_config(
+        {"layouts": ["table"], "cardless_scene_prob": 0.0}, 1234).cardless is False
+
+
 def test_unsatisfiable_layout_raises():
     # display_case needs toploader/slab; enabling only sleeve => impossible.
     try:
@@ -325,7 +353,8 @@ def test_lighting_camera_ranges_and_focus_candidate():
         assert C.CAMERA_OFFAXIS_RANGE[0] <= camera.offaxis_deg <= C.CAMERA_OFFAXIS_RANGE[1]
         assert C.CAMERA_ORBIT_RANGE[0] <= camera.orbit_deg < C.CAMERA_ORBIT_RANGE[1]
         assert camera.dof_enabled is True
-        assert C.CAMERA_FSTOP_RANGE[0] <= camera.aperture_fstop <= C.CAMERA_FSTOP_RANGE[1]
+        configured_fstop = config.load_camera_tuning()["aperture_fstop_range"]
+        assert configured_fstop[0] <= camera.aperture_fstop <= configured_fstop[1]
         assert any(not card.back_to_camera for card in cfg.cards)
 
 

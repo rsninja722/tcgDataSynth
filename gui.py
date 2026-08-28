@@ -24,7 +24,7 @@ from rules.generation import resume_next_index  # noqa: E402
 
 
 _LIST_OPTIONS = {
-    "layouts": ("table", "floating", "binder", "display_case", "hand"),
+    "layouts": ("table", "floating", "binder", "display_case", "hand", "stack"),
     "protections": ("none", "sleeve", "semi_rigid", "toploader", "slab"),
     "sleeve_types": ("clear", "opaque_back"),
     "sleeve_sizes": ("1mm", "2.5mm"),
@@ -44,7 +44,8 @@ def _output_layout() -> config.OutputLayout:
         root=os.path.join(_ROOT, config.OUTPUT.root),
         images_subdir=config.OUTPUT.images_subdir,
         labels_subdir=config.OUTPUT.labels_subdir,
-        std_labels_subdir=config.OUTPUT.std_labels_subdir,
+        yolo_labels_subdir=config.OUTPUT.yolo_labels_subdir,
+        extra_labels_subdir=config.OUTPUT.extra_labels_subdir,
         manifest_name=config.OUTPUT.manifest_name,
     )
 
@@ -77,6 +78,12 @@ class GeneratorGui:
         ttk.Entry(top, textvariable=self.blender_executable, width=74).grid(
             row=0, column=1, sticky="ew", padx=(8, 4))
         ttk.Button(top, text="Browse", command=self._browse_blender).grid(row=0, column=2)
+        self.table_texture_dir = tk.StringVar()
+        ttk.Label(top, text="Table texture directory").grid(row=1, column=0, sticky="w")
+        ttk.Entry(top, textvariable=self.table_texture_dir, width=74).grid(
+            row=1, column=1, sticky="ew", padx=(8, 4), pady=(4, 0))
+        ttk.Button(top, text="Browse", command=self._browse_table_textures).grid(
+            row=1, column=2, pady=(4, 0))
         top.columnconfigure(1, weight=1)
 
         basics = ttk.Frame(outer)
@@ -84,15 +91,22 @@ class GeneratorGui:
         self.count = tk.StringVar()
         self.base_seed = tk.StringVar()
         self.back_probability = tk.StringVar()
+        self.cardless_probability = tk.StringVar()
         self.physical_texture = tk.BooleanVar()
+        self.export_yolo_segmentation = tk.BooleanVar()
         for column, (label, variable, width) in enumerate((
                 ("Pairs", self.count, 8), ("Base seed", self.base_seed, 14),
-                ("Back-facing probability", self.back_probability, 8))):
+                ("Back-facing probability", self.back_probability, 8),
+                ("Cardless probability", self.cardless_probability, 8))):
             ttk.Label(basics, text=label).grid(row=0, column=column * 2, sticky="w")
             ttk.Entry(basics, textvariable=variable, width=width).grid(
                 row=0, column=column * 2 + 1, sticky="w", padx=(4, 12))
         ttk.Checkbutton(basics, text="Physical holo texture", variable=self.physical_texture).grid(
             row=1, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(
+            basics, text="Export YOLO segmentation + extra labels",
+            variable=self.export_yolo_segmentation).grid(
+                row=1, column=3, columnspan=4, sticky="w", pady=(4, 0))
 
         canvas_frame = ttk.Frame(outer)
         canvas_frame.pack(fill=tk.BOTH, expand=True, pady=(4, 8))
@@ -140,16 +154,24 @@ class GeneratorGui:
         if path:
             self.blender_executable.set(path)
 
+    def _browse_table_textures(self) -> None:
+        path = filedialog.askdirectory(title="Select table texture image directory")
+        if path:
+            self.table_texture_dir.set(path)
+
     def _load_config(self) -> None:
         if self._is_running():
             return
         settings = config.load_generation_settings(self.config_path)
         options = settings["enabled_options"]
         self.blender_executable.set(config.load_blender_executable(self.config_path))
+        self.table_texture_dir.set(config.load_table_texture_dir(self.config_path))
         self.count.set(str(settings["count"]))
         self.base_seed.set(str(settings["base_seed"]))
         self.back_probability.set(str(options["back_to_camera_prob"]))
+        self.cardless_probability.set(str(options["cardless_scene_prob"]))
         self.physical_texture.set(bool(options["physical_texture"]))
+        self.export_yolo_segmentation.set(bool(settings["export_yolo_segmentation"]))
         for group, values in _LIST_OPTIONS.items():
             selected = set(options[group])
             for value in values:
@@ -163,8 +185,10 @@ class GeneratorGui:
             count = int(self.count.get())
             base_seed = int(self.base_seed.get())
             back_probability = float(self.back_probability.get())
+            cardless_probability = float(self.cardless_probability.get())
         except ValueError as exc:
-            raise ValueError("Pairs, base seed, and back-facing probability must be numeric") from exc
+            raise ValueError(
+                "Pairs, base seed, and both scene probabilities must be numeric") from exc
         options: dict[str, Any] = {
             group: [value for value in values if self.checks[(group, value)].get()]
             for group, values in _LIST_OPTIONS.items()
@@ -173,13 +197,20 @@ class GeneratorGui:
         options["lighting"] = {value: self.checks[("lighting", value)].get()
                                for value in _LIGHTING_OPTIONS}
         options["back_to_camera_prob"] = back_probability
-        return {"count": count, "base_seed": base_seed, "enabled_options": options}
+        options["cardless_scene_prob"] = cardless_probability
+        return {
+            "count": count,
+            "base_seed": base_seed,
+            "export_yolo_segmentation": bool(self.export_yolo_segmentation.get()),
+            "enabled_options": options,
+        }
 
     def _save_settings(self) -> bool:
         try:
             settings = self._settings()
             config.save_generation_settings(settings, self.config_path)
             config.save_blender_executable(self.blender_executable.get(), self.config_path)
+            config.save_table_texture_dir(self.table_texture_dir.get(), self.config_path)
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Invalid settings", str(exc), parent=self.root)
             return False
@@ -197,7 +228,9 @@ class GeneratorGui:
             return
         try:
             settings = config.load_generation_settings(self.config_path)
-            next_index = resume_next_index(self.output, settings["base_seed"], settings["count"])
+            next_index = resume_next_index(
+                self.output, settings["base_seed"], settings["count"],
+                require_yolo_segmentation=settings["export_yolo_segmentation"])
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Cannot resume", str(exc), parent=self.root)
             return
@@ -222,7 +255,9 @@ class GeneratorGui:
         try:
             settings = config.load_generation_settings(self.config_path)
             while True:
-                next_index = resume_next_index(self.output, settings["base_seed"], settings["count"])
+                next_index = resume_next_index(
+                    self.output, settings["base_seed"], settings["count"],
+                    require_yolo_segmentation=settings["export_yolo_segmentation"])
                 if next_index >= settings["count"]:
                     self.events.put(("finished", "Generation complete"))
                     return

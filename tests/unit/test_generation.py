@@ -29,6 +29,14 @@ def _write_pair(paths) -> None:
         handle.write("label\n")
 
 
+def _write_yolo_pair(paths) -> None:
+    for path, content in ((paths.yolo_label_path, "0 0 0 1 0 1 1\n"),
+                          (paths.extra_label_path, "card|none\n")):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(content)
+
+
 def test_seed_and_stem_are_deterministic_and_explicit():
     assert seed_for_index(100, 4) == 104
     assert stem_for_index(4, 104) == "000004_seed104"
@@ -36,6 +44,10 @@ def test_seed_and_stem_are_deterministic_and_explicit():
     assert paths.stem == "000004_seed104"
     assert paths.image_relpath == os.path.join("images", "000004_seed104.png")
     assert paths.label_relpath == os.path.join("labels", "000004_seed104.txt")
+    assert paths.yolo_label_relpath == os.path.join(
+        "labels_yolo", "000004_seed104.txt")
+    assert paths.extra_label_relpath == os.path.join(
+        "extra_label", "000004_seed104.txt")
 
 
 def test_manifest_resume_and_recovery_of_published_pair():
@@ -93,6 +105,34 @@ def test_manifest_mismatch_is_rejected():
             pass
         else:
             raise AssertionError("manifest seed mismatch must fail resume")
+
+
+def test_yolo_resume_requires_both_synchronized_optional_files():
+    with tempfile.TemporaryDirectory() as d:
+        output = _output(d)
+        paths = pair_paths(output, 70, 0)
+        _write_pair(paths)
+        try:
+            resume_next_index(output, 70, 1, require_yolo_segmentation=True)
+        except ResumeError:
+            pass
+        else:
+            raise AssertionError("enabled YOLO export must reject a custom-only pair")
+
+        _write_yolo_pair(paths)
+        assert resume_next_index(
+            output, 70, 1, require_yolo_segmentation=True) == 1
+        with open(os.path.join(d, output.manifest_name), encoding="utf-8") as handle:
+            record = json.loads(handle.readline())
+        assert record["yolo_label"] == paths.yolo_label_relpath
+        assert record["extra_label"] == paths.extra_label_relpath
+
+        try:
+            resume_next_index(output, 70, 1, require_yolo_segmentation=False)
+        except ResumeError:
+            pass
+        else:
+            raise AssertionError("disabling export must not create a mixed-format dataset")
 
 
 def test_refraction_failures_are_appended_beside_manifest():

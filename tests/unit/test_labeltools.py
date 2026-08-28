@@ -19,6 +19,7 @@ import cv2  # noqa: E402
 
 import config  # noqa: E402
 from labeltools import yolo_pose as yp  # noqa: E402
+from labeltools import yolo_segmentation as ys  # noqa: E402
 from labeltools.visualize import (visualize_label_file, visualize_poly_label_file,
                                   _BBOX_COLOR, _CORNER_COLORS, _FLAG_COLORS,
                                   _to_px)  # noqa: E402
@@ -83,6 +84,49 @@ def test_empty_label_file_written():
         yp.write_label_file(p, [])
         assert os.path.isfile(p)
         assert os.path.getsize(p) == 0
+
+
+def test_yolo_segmentation_collapses_class_and_keeps_ordered_polygon_metadata():
+    first = yp.PolyLabel(
+        "partial", ((0.1, 0.2, 5), (0.9, 0.2, 2), (0.8, 0.9, 4)),
+        holo_tag="reverse", class_id=config.PARTIAL_CLASS_ID)
+    second = yp.PolyLabel(
+        "full", ((0.2, 0.3, 1), (0.7, 0.3, 2), (0.7, 0.8, 4)),
+        holo_tag="none")
+    assert ys.to_yolo_segmentation_line(first) == (
+        "0 0.100000 0.200000 0.900000 0.200000 0.800000 0.900000")
+    assert ys.to_extra_label_line(first) == "partial|reverse"
+    with tempfile.TemporaryDirectory() as d:
+        label_path = os.path.join(d, "labels", "sample.txt")
+        extra_path = os.path.join(d, "extra_label", "sample.txt")
+        ys.write_yolo_segmentation_files(label_path, extra_path, [first, second])
+        with open(label_path, encoding="utf-8") as handle:
+            labels = handle.read().splitlines()
+        with open(extra_path, encoding="utf-8") as handle:
+            extras = handle.read().splitlines()
+        assert len(labels) == len(extras) == 2
+        assert all(line.startswith("0 ") for line in labels)
+        assert extras == ["partial|reverse", "full|none"]
+
+
+def test_empty_yolo_segmentation_writes_two_empty_files():
+    with tempfile.TemporaryDirectory() as d:
+        label_path = os.path.join(d, "labels", "empty.txt")
+        extra_path = os.path.join(d, "extra_label", "empty.txt")
+        ys.write_yolo_segmentation_files(label_path, extra_path, [])
+        assert os.path.getsize(label_path) == 0
+        assert os.path.getsize(extra_path) == 0
+
+
+def test_yolo_segmentation_rejects_zero_area_polygon():
+    label = yp.PolyLabel(
+        "flat", ((0.1, 0.1, 1), (0.2, 0.2, 5), (0.3, 0.3, 4)))
+    try:
+        ys.to_yolo_segmentation_line(label)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("zero-area segmentation polygons must be rejected")
 
 
 def test_dataset_yaml_kpt_shape():

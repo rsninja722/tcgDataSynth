@@ -55,6 +55,15 @@ class CardInstance:
     holo_tag: str = "none"   # none | full | holo | reverse (written into the label)
     protection: object = None  # the CardConfig.protection (for occluder-rect geometry)
     back_to_camera: bool = False
+    label_enabled: bool = True
+
+
+@dataclass
+class EmptyCardUnit:
+    """Render-only protection geometry for an intentionally cardless scene."""
+    root: object
+    objects: List[object]
+    protection: object
 
 
 # Region mode -> holo label tag.
@@ -97,6 +106,15 @@ def protection_half_thickness(pcfg) -> float:
     if k == "sleeve":
         return config.CARD_T_M / 2.0 + 0.0002
     return config.CARD_T_M / 2.0
+
+
+def stack_thickness(pcfg) -> float:
+    """Physical outer thickness used to make adjacent stack units nearly touch."""
+    if pcfg.kind == "toploader":
+        return prot.TOPLOADER_GAP
+    if pcfg.kind == "sleeve":
+        return config.CARD_T_M + 0.00024
+    return config.CARD_T_M
 
 
 def _gen_holo_pattern(pattern: str, cache_dir: str, seed: int):
@@ -194,5 +212,17 @@ def build_card_instance(name: str, card_cfg, card_img, cache_dir: str, rng) -> C
     return CardInstance(root=root, card=card, card_id=card_img.card_id,
                         objects=[card] + prot_objs,
                         holo_tag=holo_tag_for_finish(card_cfg.finish),
-                        protection=card_cfg.protection,
-                        back_to_camera=bool(card_cfg.back_to_camera))
+                         protection=card_cfg.protection,
+                         back_to_camera=bool(card_cfg.back_to_camera))
+
+
+def build_empty_card_unit(name: str, card_cfg, rng) -> EmptyCardUnit:
+    """Build the configured protection around an empty, non-rendering anchor."""
+    anchor = bpy.data.objects.new(name + "_EmptyAnchor", None)
+    bpy.context.collection.objects.link(anchor)
+    root, protection_objects = _add_protection(name, anchor, card_cfg.protection, rng)
+    return EmptyCardUnit(
+        root=root,
+        objects=[anchor] + protection_objects,
+        protection=card_cfg.protection,
+    )

@@ -4,13 +4,6 @@ Blender 5.0 synthetic-scene generator for training trading-card detectors. It bu
 
 ## Current State
 
-Phases 0-4 are implemented and accepted, including table, floating, binder,
-display-case, and hand layouts with occlusion-aware labels. Phase 5 camera, lighting,
-and non-sun simplex shadow masks are accepted. Phase 6 post effects is complete; Phase
-7 standalone GUI/orchestration is complete and Phase 8 is not implemented. Current
-project-wide tuning includes nonuniform binder/display grids, randomized focus-aware
-boundary framing, softer shadows, configurable aperture/shadow opacity, and motion blur.
-
 See `PROJECT_STATUS.md` for the active checkpoint, validated decisions, and next work. See `LABEL_FORMAT.md` before consuming labels.
 
 ## Development Model
@@ -66,6 +59,11 @@ set TCG_CARD_IMAGE_ROOT=C:\path\to\card-images
 
 The image root must contain `back.png`. Optional `picture_regions.json` entries use `{card_id: [x0, y0, x1, y1]}` normalized from the image's top-left.
 
+Set `table_texture_dir` in `config.json` to a directory of background photographs.
+Every table-bearing layout chooses either one image or four images in a smoothly blended
+2x2 arrangement. Production workers require this setting for table-bearing layouts;
+the procedural fallback remains available only to direct layout tests.
+
 The hand layout loads `assets/hand_rig.blend` by default. `TCG_HAND_ASSET` remains an
 optional diagnostic override for another compatible library.
 
@@ -82,22 +80,20 @@ desktop GUI with a normal Python installation:
 python gui.py
 ```
 
-The GUI persists its count, base seed, and option toggles to `config.json`. It launches
+The GUI persists its count, base seed, texture directory, and option toggles to
+`config.json`. This includes the global cardless-scene probability and optional YOLO
+segmentation export. It launches
 one headless Blender worker per pair, so Pause waits for the active pair to be published
 and prevents any later worker from starting. Completed pairs are in `out/images` and
-`out/labels`; `out/manifest.jsonl` makes resume numbering deterministic and gap-safe.
+`out/labels`; optional segmentation files are written to `out/labels_yolo` with matching
+`<card_id>|<holo_tag>` rows in `out/extra_label`. `out/manifest.jsonl` makes resume
+numbering deterministic and gap-safe. `out/card_cache` is removed after every worker.
 Rare card instances whose finite-box corner refraction cannot be solved use their direct
 pre-refraction polygon for labels/occlusion and are listed in `out/refraction_failures.txt`.
 
-## Next Phase
 
-Phase 6 implements and Docker-tests deterministic 16-direction motion blur, sensor noise, JPEG compression,
-pixel-melt blur, white-balance and tint shifts, chromatic aberration, contrast
-reduction, and haze. Each effect's probability and sampled ranges are in the single
-user-editable `config.json`. `blender/render_output.py` stages the raw render, processed
-image, and custom label before publishing the final pair; `tests/t19_postfx_pipeline.py`
-passed as the Blender acceptance check. See `PROJECT_STATUS.md` for the next checkpoint.
+## Label Formats
 
-## Important Constraint
-
-The current production path writes a custom occlusion-aware polygon format, not valid Ultralytics YOLO-pose input. `write_dataset_yaml()` remains only for the legacy fixed-corner path. A downstream training adapter or export decision is required before pilot-dataset generation.
+The custom occlusion-aware polygon remains the primary label. Enable the
+`Export YOLO segmentation + extra labels` option for a standard class-0 polygon;
+YOLO derives its bounding box from the polygon's min/max envelope. See `LABEL_FORMAT.md`.

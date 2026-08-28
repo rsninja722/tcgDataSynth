@@ -15,6 +15,7 @@ from typing import List
 import bpy
 import bmesh
 
+import config
 from blender import scene_builder as sb
 from blender import protection as prot
 from blender import hand as hand_asset
@@ -64,10 +65,100 @@ def _noisy_material(name: str, rng):
     return mat
 
 
-def build_background(rng):
-    p = _plane("Background", 3.0, 3.0, z=-0.0005)
-    p.data.materials.append(_noisy_material("BgMat", rng))
+def _table_material(name: str, rng, texture_paths=()):
+    """Photographic table material, or the legacy procedural fallback."""
+    paths = tuple(texture_paths)
+    if not paths:
+        return _noisy_material(name, rng)
+
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    links = mat.node_tree.links
+    bsdf = nodes.get("Principled BSDF")
+    bsdf.inputs["Roughness"].default_value = float(rng.uniform(0.45, 0.9))
+    uv = nodes.new("ShaderNodeTexCoord")
+
+    if float(rng.random()) < 0.5:
+        selected = [paths[int(rng.integers(0, len(paths)))]]
+        image = nodes.new("ShaderNodeTexImage")
+        image.image = bpy.data.images.load(selected[0], check_existing=True)
+        links.new(uv.outputs["UV"], image.inputs["Vector"])
+        links.new(image.outputs["Color"], bsdf.inputs["Base Color"])
+        mode = "single"
+    else:
+        indices = rng.choice(len(paths), size=4, replace=len(paths) < 4)
+        selected = [paths[int(index)] for index in indices]
+        colors = []
+        tile_span = 0.525
+        tile_scale = 1.0 / tile_span
+        for index, path in enumerate(selected):
+            col, row = index % 2, index // 2
+            scale = nodes.new("ShaderNodeVectorMath")
+            scale.operation = "MULTIPLY"
+            scale.inputs[1].default_value = (tile_scale, tile_scale, 1.0)
+            shift = nodes.new("ShaderNodeVectorMath")
+            shift.operation = "ADD"
+            shift.inputs[1].default_value = (
+                -0.475 * tile_scale * float(col),
+                -0.475 * tile_scale * float(row), 0.0)
+            image = nodes.new("ShaderNodeTexImage")
+            image.image = bpy.data.images.load(path, check_existing=True)
+            image.extension = "CLIP"
+            links.new(uv.outputs["UV"], scale.inputs[0])
+            links.new(scale.outputs["Vector"], shift.inputs[0])
+            links.new(shift.outputs["Vector"], image.inputs["Vector"])
+            colors.append(image.outputs["Color"])
+
+        separate = nodes.new("ShaderNodeSeparateXYZ")
+        links.new(uv.outputs["UV"], separate.inputs["Vector"])
+
+        def seam_mask(source):
+            mask = nodes.new("ShaderNodeMapRange")
+            mask.interpolation_type = "SMOOTHERSTEP"
+            mask.inputs["From Min"].default_value = 0.475
+            mask.inputs["From Max"].default_value = 0.525
+            links.new(source, mask.inputs["Value"])
+            return mask.outputs["Result"]
+
+        x_mask = seam_mask(separate.outputs["X"])
+        y_mask = seam_mask(separate.outputs["Y"])
+        lower = nodes.new("ShaderNodeMixRGB")
+        upper = nodes.new("ShaderNodeMixRGB")
+        combined = nodes.new("ShaderNodeMixRGB")
+        links.new(x_mask, lower.inputs[0])
+        links.new(colors[0], lower.inputs[1])
+        links.new(colors[1], lower.inputs[2])
+        links.new(x_mask, upper.inputs[0])
+        links.new(colors[2], upper.inputs[1])
+        links.new(colors[3], upper.inputs[2])
+        links.new(y_mask, combined.inputs[0])
+        links.new(lower.outputs[0], combined.inputs[1])
+        links.new(upper.outputs[0], combined.inputs[2])
+        links.new(combined.outputs[0], bsdf.inputs["Base Color"])
+        mode = "quad"
+
+    mat["tcg_table_texture_mode"] = mode
+    mat["tcg_table_texture_paths"] = "|".join(selected)
+    mat["tcg_table_texture_seam_overlap"] = 0.05 if mode == "quad" else 0.0
+    return mat
+
+
+def build_background(rng, texture_paths=(), name="Background", material_name="BgMat",
+                     z: float = -0.0005):
+    p = _plane(name, 3.0, 3.0, z=z)
+    p.data.materials.append(_table_material(material_name, rng, texture_paths))
     return p
+
+
+def _build_scene_unit(scene_cfg, name, card_cfg, card_lib, cache_dir, rng):
+    if scene_cfg.cardless:
+        # Match the normal path's card selection and per-instance texture seed draws
+        # before constructing the same protection geometry without a card mesh.
+        card_lib.select(rng)
+        rng.integers(0, 2 ** 30)
+        return sb.build_empty_card_unit(name, card_cfg, rng), False
+    return sb.build_card_instance(name, card_cfg, card_lib.select(rng), cache_dir, rng), True
 
 
 def build_clutter(rng, n: int):
@@ -84,10 +175,10 @@ def build_clutter(rng, n: int):
 
 
 def build_table(scene_cfg, card_lib, cache_dir: str, rng,
-                allow_overlap: bool = False) -> List["sb.CardInstance"]:
+                allow_overlap: bool = False, table_texture_paths=()) -> List["sb.CardInstance"]:
     """Table layout: cards laid flat (face up) on a cluttered surface. If
     `allow_overlap`, cards may overlap up to ~15% (tighter); else fully spaced."""
-    build_background(rng)
+    build_background(rng, table_texture_paths)
     build_clutter(rng, scene_cfg.layout.params.get("clutter_rects", 3))
 
     instances = []
@@ -101,8 +192,8 @@ def build_table(scene_cfg, card_lib, cache_dir: str, rng,
     spacing = base * 0.85 + 0.004 if allow_overlap else base + 0.006
     jit = 0.012 if allow_overlap else 0.006
     for i, ccfg in enumerate(scene_cfg.cards):
-        card_img = card_lib.select(rng)
-        inst = sb.build_card_instance(f"Card{i}", ccfg, card_img, cache_dir, rng)
+        inst, has_card = _build_scene_unit(
+            scene_cfg, f"Card{i}", ccfg, card_lib, cache_dir, rng)
         gx, gy = i % cols, i // cols
         x = (gx - (cols - 1) / 2.0) * spacing + float(rng.uniform(-jit, jit))
         y = (gy - (rows - 1) / 2.0) * spacing + float(rng.uniform(-jit, jit))
@@ -112,7 +203,8 @@ def build_table(scene_cfg, card_lib, cache_dir: str, rng,
         rx = math.pi if ccfg.back_to_camera else 0.0   # flipped -> back up, not labeled
         inst.root.location = (x, y, z)
         inst.root.rotation_euler = (rx, 0.0, float(rng.uniform(0.0, 6.283)))
-        instances.append(inst)
+        if has_card:
+            instances.append(inst)
     return instances
 
 
@@ -201,8 +293,8 @@ _BINDER_CONTENT = {
 
 
 def _build_binder_page(pivot, pivot_x, pcx, page_w, page_h, pad, cw, ch, gap, rows, cols,
-                       cg, ct, page_color, warp, rng, cards, filled, cache_dir, card_lib,
-                       instances, tag):
+                        cg, ct, page_color, warp, rng, cards, filled, cache_dir, card_lib,
+                        instances, tag, scene_cfg):
     """Build one page (back + welded slot grid + cards + clear front) on a half,
     parented to that half's `pivot`. World x = pivot_x + local x."""
     def local(wx):
@@ -260,13 +352,14 @@ def _build_binder_page(pivot, pivot_x, pcx, page_w, page_h, pad, cw, ch, gap, ro
         r, c = slot // cols, slot % cols
         sx = -page_w / 2 + pad + c * (cw + gap) + cw / 2
         sy = page_h / 2 - pad - r * (ch + gap) - ch / 2
-        inst = sb.build_card_instance(f"Card{slot}", card_cfg, card_lib.select(rng),
-                                      cache_dir, rng)
+        inst, has_card = _build_scene_unit(
+            scene_cfg, f"Card{slot}", card_cfg, card_lib, cache_dir, rng)
         inst.root.location = (local(pcx + sx), sy, ct / 2 + 0.0004)
         inst.root.rotation_euler = (math.pi if card_cfg.back_to_camera else 0.0, 0.0, 0.0)
         _apply_grid_jitter(inst, rng)
         inst.root.parent = pivot
-        instances.append(inst)
+        if has_card:
+            instances.append(inst)
 
     front = _plane(f"PageFront_{tag}", page_w, page_h)
     front.location = (local(pcx), 0.0, cg)
@@ -275,7 +368,7 @@ def _build_binder_page(pivot, pivot_x, pcx, page_w, page_h, pad, cw, ch, gap, ro
                                                         warp_strength=0.5))
 
 
-def build_binder(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
+def build_binder(scene_cfg, card_lib, cache_dir: str, rng, table_texture_paths=(), **_ignored):
     """Binder layout: centered 30mm spine with two cover halves that tilt inward up to
     10deg; the content page (welded slot grid) sits on the configured side; a reused
     table backdrop fills the background. Returns (instances, frame_extent_m)."""
@@ -299,9 +392,8 @@ def build_binder(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
     tilt = math.radians(float(rng.uniform(0.0, 10.0)))   # inward tilt of the halves
 
     # Reuse the table (background plane, no clutter) so the bg isn't a grey void.
-    bg = _plane("Table", 3.0, 3.0)
-    bg.location = (0.0, 0.0, -0.11)
-    bg.data.materials.append(_noisy_material("TableMat", rng))
+    build_background(
+        rng, table_texture_paths, name="Table", material_name="TableMat", z=-0.11)
 
     # Centered spine.
     spine = _box("Spine", spine_w, board_h, 0.012)
@@ -323,7 +415,7 @@ def build_binder(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
         if this_side == side:
             _build_binder_page(pivot, pivot_x, board_cx, page_w, page_h, pad, cw, ch, gap,
                                rows, cols, cg, ct, page_color, warp, rng, scene_cfg.cards,
-                               filled, cache_dir, card_lib, instances, this_side)
+                               filled, cache_dir, card_lib, instances, this_side, scene_cfg)
         pivot.rotation_euler = (0.0, -sign * tilt, 0.0)   # tilt both halves inward
 
     extent = max(2.0 * half_w + spine_w, board_h)
@@ -373,8 +465,8 @@ def build_floating(scene_cfg, card_lib, cache_dir: str, rng,
     spacing = base * 0.8 + 0.004 if allow_overlap else base + 0.004
     jit = 0.02
     for i, ccfg in enumerate(scene_cfg.cards):
-        card_img = card_lib.select(rng)
-        inst = sb.build_card_instance(f"Card{i}", ccfg, card_img, cache_dir, rng)
+        inst, has_card = _build_scene_unit(
+            scene_cfg, f"Card{i}", ccfg, card_lib, cache_dir, rng)
         gx, gy = i % cols, i // cols
         x = (gx - (cols - 1) / 2.0) * spacing + float(rng.uniform(-jit, jit))
         y = (gy - (rows - 1) / 2.0) * spacing + float(rng.uniform(-jit, jit))
@@ -386,7 +478,8 @@ def build_floating(scene_cfg, card_lib, cache_dir: str, rng,
             ry += math.pi
         inst.root.location = (x, y, z)
         inst.root.rotation_euler = (rx, ry, rz)
-        instances.append(inst)
+        if has_card:
+            instances.append(inst)
     return instances
 
 
@@ -398,7 +491,8 @@ def build_floating(scene_cfg, card_lib, cache_dir: str, rng,
 _CASE_HEADROOM = 0.040   # cover sits 40mm above the top of the tallest (rotated) item
 
 
-def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, enabled_options=None, **_ignored):
+def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, enabled_options=None,
+                       table_texture_paths=(), **_ignored):
     """Display case: cards in a tight aligned grid on a random-material base with
     four side walls (same material) rising to a scratched/smudged 6mm acrylic cover
     that clears the tallest item by _CASE_HEADROOM (40mm); cards all flat or all
@@ -441,7 +535,8 @@ def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, enabled_options
         cy = ((rows - 1) / 2.0 - gy) * sy         # fill the top row first
         fh_i = sb.protection_footprint(ccfg.protection)[1]
         ht_i = sb.protection_half_thickness(ccfg.protection)
-        inst = sb.build_card_instance(f"Card{i}", ccfg, card_lib.select(rng), cache_dir, rng)
+        inst, has_card = _build_scene_unit(
+            scene_cfg, f"Card{i}", ccfg, card_lib, cache_dir, rng)
         # Stand the card UP by hinging about its BOTTOM (-Y, art-bottom) edge, which
         # rests on the base: the bottom edge stays planted while the top (+Y, art-top)
         # edge lifts toward the camera. This keeps the art right-side-up and stops the
@@ -457,7 +552,8 @@ def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, enabled_options
         inst.root.location = (cx, loc_y, loc_z)
         inst.root.rotation_euler = (rx, 0.0, 0.0)
         _apply_grid_jitter(inst, rng)
-        instances.append(inst)
+        if has_card:
+            instances.append(inst)
         top_z = max(top_z, loc_z + half)          # top-front corner world z
 
     # Case interior height = tallest item's top + headroom. Side walls (same material
@@ -506,18 +602,20 @@ def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, enabled_options
     if float(rng.random()) < float(p.get("top_card_probability", 0.20)):
         top_cfg = C.sample_top_card(rng, enabled_options)
         ht_t = sb.protection_half_thickness(top_cfg.protection)
-        inst = sb.build_card_instance("TopCard", top_cfg, card_lib.select(rng), cache_dir, rng)
+        inst, has_card = _build_scene_unit(
+            scene_cfg, "TopCard", top_cfg, card_lib, cache_dir, rng)
         inst.root.location = (float(rng.uniform(-case_w / 2.0, case_w / 2.0)),
                               float(rng.uniform(-case_h / 2.0, case_h / 2.0)),
                               cover_top + ht_t + eps)
         inst.root.rotation_euler = (0.0, 0.0, float(rng.uniform(0.0, 2.0 * math.pi)))
-        instances.append(inst)
+        if has_card:
+            instances.append(inst)
 
     # Table the whole case sits on (reused from the binder scene): a large noisy plane
     # just BELOW the case base so the background isn't a void. Built LAST so its rng
     # draw doesn't shift the earlier base/grid/cover/top-card randomness.
-    table = _plane("CaseTable", 3.0, 3.0, z=-0.003)
-    table.data.materials.append(_noisy_material("CaseTableMat", rng))
+    build_background(
+        rng, table_texture_paths, name="CaseTable", material_name="CaseTableMat", z=-0.003)
 
     extent = max(grid_w, grid_h) + 0.05
     return instances, extent
@@ -527,7 +625,7 @@ def build_display_case(scene_cfg, card_lib, cache_dir: str, rng, enabled_options
 # Hand (spec section 3.5.4): one front-facing bare/sleeved/toploadered card held
 # in a side or pinch grip above the same noisy table used by other Phase 4 scenes.
 # --------------------------------------------------------------------------- #
-def build_hand(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
+def build_hand(scene_cfg, card_lib, cache_dir: str, rng, table_texture_paths=(), **_ignored):
     """Build one card and a seeded left/right hand grip.
 
     Returns ``(instances, frame_extent_m)``. Hands are deliberately not label
@@ -536,13 +634,13 @@ def build_hand(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
     params = scene_cfg.layout.params
     card_cfg = scene_cfg.cards[0]
 
-    table = build_background(rng)
+    table = build_background(rng, table_texture_paths)
     table.name = "HandTable"
     table.location.z = -0.12
     table.data.materials[0].name = "HandTableMat"
 
-    instance = sb.build_card_instance(
-        "Card0", card_cfg, card_lib.select(rng), cache_dir, rng)
+    instance, has_card = _build_scene_unit(
+        scene_cfg, "Card0", card_cfg, card_lib, cache_dir, rng)
     instance.root.location = (0.0, 0.0, 0.0)
     instance.root.rotation_euler = (0.0, 0.0, 0.0)
 
@@ -557,4 +655,50 @@ def build_hand(scene_cfg, card_lib, cache_dir: str, rng, **_ignored):
         card_z=0.0,
         rng=rng,
     )
-    return [instance], 0.30
+    return ([instance] if has_card else []), 0.30
+
+
+# --------------------------------------------------------------------------- #
+# Stack: 1-10 uniformly protected cards, almost touching vertically over a table.
+# Only the top card is eligible for a label; lower cards remain visual occluders.
+# --------------------------------------------------------------------------- #
+def build_stack(scene_cfg, card_lib, cache_dir: str, rng, table_texture_paths=(), **_ignored):
+    build_background(
+        rng, table_texture_paths, name="StackTable", material_name="StackTableMat", z=-0.00001)
+    configs = scene_cfg.cards
+    footprint = sb.protection_footprint(configs[-1].protection)
+    thickness = sb.stack_thickness(configs[-1].protection)
+    half_thickness = thickness / 2.0
+    step_z = thickness + 0.0001
+    clearance = float(scene_cfg.layout.params["table_clearance_m"])
+    offsets = scene_cfg.layout.params["offsets"]
+    instances = []
+    top_root = None
+    for index, (card_cfg, offset) in enumerate(zip(configs, offsets)):
+        unit, has_card = _build_scene_unit(
+            scene_cfg, f"Card{index}", card_cfg, card_lib, cache_dir, rng)
+        unit.root.location = (
+            float(offset["x_frac"]) * config.CARD_W_M,
+            float(offset["y_frac"]) * config.CARD_H_M,
+            clearance + half_thickness + index * step_z,
+        )
+        unit.root.rotation_euler = (
+            0.0, 0.0, math.radians(float(offset["rotation_deg"])))
+        top_root = unit.root
+        if has_card:
+            unit.label_enabled = index == len(configs) - 1
+            unit.root["tcg_label_enabled"] = unit.label_enabled
+            instances.append(unit)
+
+    if scene_cfg.layout.params.get("with_hand"):
+        params = scene_cfg.layout.params["hand"]
+        hand_asset.build_hand(
+            "StackHand", params["handedness"], params["grip"], footprint,
+            float(params["approach_deg"]), float(params["depth"]),
+            protection_half_thickness=half_thickness,
+            card_z=float(top_root.location.z), rng=rng)
+
+    extent = max(footprint) * 1.3
+    if scene_cfg.layout.params.get("with_hand"):
+        extent = max(extent, 0.30)
+    return instances, extent
