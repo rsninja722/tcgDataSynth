@@ -1,7 +1,8 @@
 {
   "_comment": "Central tuning config for tcgDataSynth. Edit and re-run; scripts read this at runtime. Each scene type has its OWN params under 'layouts'.",
-  "blender_executable": "C:\\Program Files\\Blender Foundation\\Blender 5.0\\blender.exe",
+  "blender_executable": "C:/Program Files/Blender Foundation/Blender 5.0/blender.exe",
   "table_texture_dir": "C:/Code/React/CollectiblesApp/src/ai_dev/datasets/YOLO_training/backgrounds/val2017",
+  "card_image_root": "C:/Code/React/CollectiblesApp/src/ai_dev/datasets/pokemon/data/images",
   "holo": {
     "_comment": "Holo diffraction-flash. angle_gain: flash-band motion vs view angle. pattern_gain: spatial break-up. sharpness: flash threshold. emit: peak flash brightness. darken: base darkening between flashes.",
     "angle_gain": 12.0,
@@ -105,7 +106,7 @@
   },
   "generation": {
     "count": 2000,
-    "base_seed": 865531,
+    "base_seed": 867764,
     "export_yolo_segmentation": true,
     "enabled_options": {
       "layouts": [

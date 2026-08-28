@@ -660,7 +660,8 @@ def build_hand(scene_cfg, card_lib, cache_dir: str, rng, table_texture_paths=(),
 
 # --------------------------------------------------------------------------- #
 # Stack: 1-10 uniformly protected cards, almost touching vertically over a table.
-# Only the top card is eligible for a label; lower cards remain visual occluders.
+# Only the top card is eligible for labels and label occlusion; lower cards remain
+# render-only stack geometry.
 # --------------------------------------------------------------------------- #
 def build_stack(scene_cfg, card_lib, cache_dir: str, rng, table_texture_paths=(), **_ignored):
     build_background(

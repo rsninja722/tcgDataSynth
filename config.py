@@ -15,14 +15,6 @@ import json
 from dataclasses import dataclass, field
 from typing import Tuple
 
-# --------------------------------------------------------------------------- #
-# Paths
-# --------------------------------------------------------------------------- #
-# Root folder that is recursively searched for card face images. This is the
-# USER's machine path (not visible from the Docker dev container). Override with
-# the TCG_CARD_IMAGE_ROOT env var when running elsewhere.
-DEFAULT_CARD_IMAGE_ROOT = r"C:\Code\React\CollectiblesApp\src\ai_dev\datasets\pokemon\data\images"
-
 # Compact CC0 left/right rig library bundled with the project. It contains only the
 # hand meshes, armatures, and their required dependencies. TCG_HAND_ASSET remains an
 # explicit override for diagnostics with another compatible library.
@@ -51,14 +43,11 @@ BACK_IMAGE_FILENAME = "back.png"
 
 def back_image_path() -> str:
     """Absolute path to the generic card-back texture, or '' if not present."""
-    p = os.path.join(card_image_root(), BACK_IMAGE_FILENAME)
+    root = card_image_root()
+    if not root:
+        return ""
+    p = os.path.join(root, BACK_IMAGE_FILENAME)
     return p if os.path.isfile(p) else ""
-
-
-def card_image_root() -> str:
-    """Resolved card image root: env override wins, else the baked-in default."""
-    return os.environ.get("TCG_CARD_IMAGE_ROOT", DEFAULT_CARD_IMAGE_ROOT)
-
 
 # --------------------------------------------------------------------------- #
 # Physical card geometry (spec §3.1)
@@ -93,9 +82,9 @@ CAMERA_MAX_OFFAXIS_DEG = 50.0
 # project is transmission-heavy (sleeves/holders/slab/binder/display-case). User
 # has Cycles+CUDA configured. EEVEE stays selectable for the Phase 8 A/B compare.
 RENDER_ENGINE = "CYCLES"               # "CYCLES" | "BLENDER_EEVEE"
-CYCLES_SAMPLES = 128                    # with denoising; tune for speed in Phase 8
+CYCLES_SAMPLES = 32                    # with denoising; tune for speed in Phase 8
 CYCLES_DEVICE = "GPU"                   # user configured CUDA
-EEVEE_RENDER_SAMPLES = 64              # scene.eevee.taa_render_samples
+EEVEE_RENDER_SAMPLES = 32              # scene.eevee.taa_render_samples
 
 # Color management view transform, LOCKED (Phase 0 confirmed 'AgX' is the 5.0
 # default & active). postfx assumes this stays constant across the whole dataset.
@@ -158,6 +147,7 @@ CONFIG_FILENAME = "config.json"
 DEFAULT_CONFIG = {
     "blender_executable": r"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe",
     "table_texture_dir": "",
+    "card_image_root": "",
     "holo": {
         "angle_gain": 12.0,    # flash-band motion speed vs view angle
         "pattern_gain": 4.0,   # spatial break-up of the flash phase by the pattern
@@ -497,6 +487,15 @@ def load_table_texture_dir(path: str = None) -> str:
         os.path.abspath(__file__))
     return os.path.abspath(os.path.join(base, value))
 
+def card_image_root(path: str = None) -> str:
+    """Configured card-library directory, resolved relative to config.json."""
+    value = str(load_config(path)["card_image_root"]).strip()
+    if not value or os.path.isabs(value):
+        return value
+    base = os.path.dirname(os.path.abspath(path)) if path else os.path.dirname(
+        os.path.abspath(__file__))
+    return os.path.abspath(os.path.join(base, value))
+    
 
 def _read_raw_config(path: str) -> dict:
     if os.path.isfile(path):

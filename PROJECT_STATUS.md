@@ -62,7 +62,9 @@ Requested dataset-generation extensions implemented; Blender t22 acceptance pend
 - Table-bearing layouts use a configured image directory, choosing 50/50 between a
   single image and a four-image 2x2 material with a smooth 5% seam overlap.
 - Stack scenes contain 1-10 uniformly protected cards; only the top card is labelable,
-  and a hand is sampled around it with 25% probability.
+  and a hand is sampled around it with 25% probability. Lower stack cards remain
+  render-only and are excluded from label occlusion so mean-depth ordering cannot hide
+  the physically topmost card.
 - A single GUI probability controls intentional cardless variants for every layout.
 - Each standalone worker removes `out/card_cache` in a `finally` block.
 - Failed GUI workers are persisted as skipped manifest attempts so resume advances to
@@ -107,5 +109,7 @@ metadata in a sibling directory. Full details are in `LABEL_FORMAT.md`.
 - The container has no Blender. The integrated stack, image-texture shader, cardless
   geometry, YOLO publication, and cache cleanup await `tests/t22_requested_features.py`
   under Blender 5.0.0.
+- The seed-867779 stack/YOLO missing-label regression awaits
+  `tests/t23_stack_yolo_seed.py` under Blender 5.0.0.
 
 ## Next Goals

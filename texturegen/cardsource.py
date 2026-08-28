@@ -51,7 +51,7 @@ def discover_card_paths(
     Sorting matters: selection is seed-driven, so the candidate order must be
     stable across runs/machines for a seed to reproduce the same card.
     """
-    root = root or config.card_image_root()
+    root = config.card_image_root() if root is None else root
     found: List[str] = []
     for dirpath, _dirnames, filenames in os.walk(root):
         for fn in filenames:
@@ -124,7 +124,7 @@ class CardLibrary:
         exts: Sequence[str] = config.CARD_IMAGE_EXTS,
         region_search_dirs: Optional[Sequence[str]] = None,
     ) -> None:
-        self.root = root or config.card_image_root()
+        self.root = config.card_image_root() if root is None else root
         self.paths: List[str] = discover_card_paths(self.root, exts)
         by_id: Dict[str, List[str]] = {}
         for path in self.paths:
@@ -155,8 +155,8 @@ class CardLibrary:
         """
         if self.is_empty():
             raise RuntimeError(
-                f"No card images found under {self.root!r}. Check the path / "
-                f"TCG_CARD_IMAGE_ROOT env var and that it contains "
+                f"No card images found under {self.root!r}. Check "
+                f"card_image_root in config.json and that it contains "
                 f"{config.CARD_IMAGE_EXTS} files."
             )
         idx = int(rng.integers(0, len(self.paths)))

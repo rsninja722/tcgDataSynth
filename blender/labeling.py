@@ -191,7 +191,10 @@ def label_scene(scene, cam, instances, area_frac: float = 0.25,
         if not inst.label_enabled:
             results.append((inst, None, "label-disabled"))
             continue
-        occluders = [q for j, ql in enumerate(occ_quads) if j != i for q in ql]
+        # Lower stack cards are render-only. With an oblique camera, their lateral
+        # offsets can make mean-depth ordering place them ahead of the physical top.
+        occluders = [q for j, ql in enumerate(occ_quads)
+                     if j != i and instances[j].label_enabled for q in ql]
         pts, cls, reason = compute_bound(
             inst.card_id, ndc, fv, occluders=occluders,
             card_depth=depth, area_frac=area_frac)
