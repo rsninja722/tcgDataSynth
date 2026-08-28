@@ -1,12 +1,48 @@
 # tcgDataSynth
 
-Blender 5.0 synthetic-scene generator for training trading-card detectors. It builds randomized cards, protection, finishes, damage, layouts, and labels while keeping geometry-independent logic testable outside Blender.
+An experiment in leveraging agentic workflows to create programmatically generated 3d scenes to be rendered into synthetic training data for use in computer vision model training.
 
-## Current State
+"Blender 5.0 synthetic-scene generator for training trading-card detectors. It builds randomized cards, protection, finishes, damage, layouts, and labels while keeping geometry-independent logic testable outside Blender."
+
+![](assets/sample.jpg)
+
+
+## Demo
+
+demo using a yolo segmentation model and mobilenet embedding model both fine tuned entirely on synthetic data
+
+
+
+## Blender Setup
+
+The known Blender executable is:
+
+```text
+C:\Program Files\Blender Foundation\Blender 5.0\blender.exe
+```
+
+Install runtime dependencies into Blender's bundled Python from an administrator terminal:
+
+```bat
+"C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe" -m pip install opencv-python-headless shapely
+```
+
+## Standalone GUI
+
+Set paths in `config.json` to the Blender 5.0 executable, then run the
+desktop GUI with a normal Python installation:
+
+```bash
+python gui.py
+```
+
+## For Models
+
+### Current State
 
 See `PROJECT_STATUS.md` for the active checkpoint, validated decisions, and next work. See `LABEL_FORMAT.md` before consuming labels.
 
-## Development Model
+### Development Model
 
 The development container has no Blender or GUI. Code is split accordingly:
 
@@ -24,7 +60,7 @@ out/            generated output (ignored)
 
 Substantial Blender changes are delivered through a focused numbered script, then paused for user feedback before the next major change.
 
-## Container Setup
+### Container Setup
 
 Python 3.11 is expected.
 
@@ -37,25 +73,7 @@ bash run_unit_tests.sh
 
 `run_unit_tests.sh` fails early when required dependencies are absent. Shapely is mandatory because silently omitting occlusion would produce incorrect labels.
 
-## Blender Setup
-
-The known Blender executable is:
-
-```text
-C:\Program Files\Blender Foundation\Blender 5.0\blender.exe
-```
-
-Install runtime dependencies into Blender's bundled Python from an administrator terminal:
-
-```bat
-"C:\Program Files\Blender Foundation\Blender 5.0\5.0\python\bin\python.exe" -m pip install opencv-python-headless shapely
-```
-
-Card images default to the path in `config.py`. Override it without editing code:
-
-```bat
-set TCG_CARD_IMAGE_ROOT=C:\path\to\card-images
-```
+### Blender info
 
 The image root must contain `back.png`. Optional `picture_regions.json` entries use `{card_id: [x0, y0, x1, y1]}` normalized from the image's top-left.
 
@@ -71,14 +89,7 @@ The compact hand library passed `tests/t15_hand_asset_bundle.py` under Blender 5
 and the five integrated `tests/t14_hand.py` cases passed from the bundled default.
 Rebuild and validation instructions are in `assets/HAND_RIG.md`.
 
-## Standalone GUI
-
-Set `blender_executable` in `config.json` to the Blender 5.0 executable, then run the
-desktop GUI with a normal Python installation:
-
-```bash
-python gui.py
-```
+### GUI Info
 
 The GUI persists its count, base seed, texture directory, and option toggles to
 `config.json`. This includes the global cardless-scene probability and optional YOLO
@@ -94,7 +105,7 @@ Rare card instances whose finite-box corner refraction cannot be solved use thei
 pre-refraction polygon for labels/occlusion and are listed in `out/refraction_failures.txt`.
 
 
-## Label Formats
+### Label Formats
 
 The custom occlusion-aware polygon remains the primary label. Enable the
 `Export YOLO segmentation + extra labels` option for a standard class-0 polygon;

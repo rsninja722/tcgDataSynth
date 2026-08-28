@@ -12,3 +12,9 @@ venv/
 *.blend1
 *.blend2
 *.tmp.blend
+ml/runs
+ml/dataset
+ml/card_crops
+ml/card_crop_manifest.json
+ml/dataset.yaml
+ml/*.pt

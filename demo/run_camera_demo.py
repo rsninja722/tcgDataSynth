@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
+from collections import Counter, deque
 from pathlib import Path
 
 import cv2
@@ -27,12 +29,20 @@ CARD_METADATA = MODELS_DIR / "card_metadata.json"
 
 CAMERA_DEVICE = "0"
 YOLO_CONFIDENCE_THRESHOLD = 0.65
-EMBEDDING_SIMILARITY_THRESHOLD = 0.65
+EMBEDDING_SIMILARITY_THRESHOLD = 0.3
 CARD_CROP_WIDTH = 160
 CARD_CROP_HEIGHT = 224
 IMAGE_SIZE = 224
 EMBEDDING_DIMENSION = 512
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+# Temporal voting: a detection is only labelled once its track has accumulated enough
+# consistent per-frame identifications, which smooths over single-frame misreads.
+VOTE_HISTORY_LENGTH = 20          # number of recent per-frame identifications kept per track
+MIN_VOTES_TO_DISPLAY = 3          # a track needs at least this many votes before it can be labelled
+MIN_VOTE_SHARE_TO_DISPLAY = 0.25  # the top identification must hold over this share of the votes
+MAX_TRACK_DISTANCE_FRACTION = 0.2  # max centroid movement (as a fraction of preview side) to still match a track
+MAX_MISSED_FRAMES = 4            # frames a track may go undetected before it is dropped
 
 EVAL_TRANSFORM = transforms.Compose([
     transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
@@ -60,6 +70,78 @@ class MobileNetSmallEmbedding(nn.Module):
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         return self.classifier(self.embed(images))
+
+
+class CardTrack:
+    """Follows one physical card slot across frames and tallies its per-frame identifications."""
+
+    def __init__(self, track_id: int, centroid: np.ndarray) -> None:
+        self.track_id = track_id
+        self.centroid = centroid
+        self.votes: deque[int] = deque(maxlen=VOTE_HISTORY_LENGTH)
+        self.missed_frames = 0
+
+    def add_vote(self, gallery_index: int) -> None:
+        self.votes.append(gallery_index)
+
+    def top_vote(self) -> tuple[int | None, int, int]:
+        """Return (top gallery index, its vote count, total vote count) for the current window."""
+        total_votes = len(self.votes)
+        if total_votes == 0:
+            return None, 0, 0
+        top_index, top_count = Counter(self.votes).most_common(1)[0]
+        return top_index, top_count, total_votes
+
+
+class CardTracker:
+    """Greedy nearest-centroid tracker linking detections across frames so identification can be voted on over time."""
+
+    def __init__(self) -> None:
+        self._tracks: dict[int, CardTrack] = {}
+        self._next_id = itertools.count()
+
+    def update(self, centroids: list[np.ndarray], max_distance: float) -> list[CardTrack]:
+        """Match this frame's centroids to existing tracks (or start new ones); return one track per centroid, in order."""
+        unmatched_track_ids = set(self._tracks)
+
+        candidate_pairs = []
+        for detection_index, centroid in enumerate(centroids):
+            for track_id in unmatched_track_ids:
+                distance = float(np.linalg.norm(centroid - self._tracks[track_id].centroid))
+                if distance <= max_distance:
+                    candidate_pairs.append((distance, detection_index, track_id))
+        candidate_pairs.sort(key=lambda pair: pair[0])
+
+        assignments: dict[int, int] = {}
+        assigned_detections: set[int] = set()
+        assigned_tracks: set[int] = set()
+        for _, detection_index, track_id in candidate_pairs:
+            if detection_index in assigned_detections or track_id in assigned_tracks:
+                continue
+            assignments[detection_index] = track_id
+            assigned_detections.add(detection_index)
+            assigned_tracks.add(track_id)
+
+        results: list[CardTrack] = []
+        for detection_index, centroid in enumerate(centroids):
+            track_id = assignments.get(detection_index)
+            if track_id is None:
+                track_id = next(self._next_id)
+                self._tracks[track_id] = CardTrack(track_id, centroid)
+            else:
+                track = self._tracks[track_id]
+                track.centroid = centroid
+                track.missed_frames = 0
+                unmatched_track_ids.discard(track_id)
+            results.append(self._tracks[track_id])
+
+        for track_id in unmatched_track_ids:
+            track = self._tracks[track_id]
+            track.missed_frames += 1
+            if track.missed_frames > MAX_MISSED_FRAMES:
+                del self._tracks[track_id]
+
+        return results
 
 
 def center_square(frame: np.ndarray) -> np.ndarray:
@@ -170,9 +252,13 @@ def draw_label(frame: np.ndarray, polygon: np.ndarray, text: str, accepted: bool
         return
     x = int(points[:, 0, 0].min())
     y = max(20, int(points[:, 0, 1].min()) - 8)
-    (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-    cv2.rectangle(frame, (x, y - text_height - 6), (x + text_width + 6, y + 3), (0, 0, 0), -1)
-    cv2.putText(frame, text, (x + 3, y - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+    txts = text.split("|")
+    i = 0
+    for t in txts:
+        (text_width, text_height), _ = cv2.getTextSize(t.strip(), cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cv2.rectangle(frame, (x, y - text_height - 2 - i), (x + text_width + 6, y + 1 - i), (0, 0, 0), -1)
+        cv2.putText(frame, t.strip(), (x + 3, y - 3 - i), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+        i += text_height + 3
 
 
 def parse_camera_device(value: str) -> int | str:
@@ -184,6 +270,10 @@ def main() -> None:
     parser.add_argument("--camera", default=CAMERA_DEVICE, help="Camera index, device path, or OpenCV stream URL.")
     parser.add_argument("--yolo-confidence", type=float, default=YOLO_CONFIDENCE_THRESHOLD)
     parser.add_argument("--embedding-similarity", type=float, default=EMBEDDING_SIMILARITY_THRESHOLD)
+    parser.add_argument("--min-votes", type=int, default=MIN_VOTES_TO_DISPLAY,
+                         help="Minimum votes a tracked card needs before its ID is displayed.")
+    parser.add_argument("--min-vote-share", type=float, default=MIN_VOTE_SHARE_TO_DISPLAY,
+                         help="Minimum share of votes the top identification must hold before it is displayed.")
     args = parser.parse_args()
 
     required_paths = (YOLO_WEIGHTS, EMBEDDING_WEIGHTS, GALLERY_EMBEDDINGS, GALLERY_IDS, CARD_METADATA)
@@ -198,6 +288,7 @@ def main() -> None:
     if not camera.isOpened():
         raise RuntimeError(f"Could not open camera source: {args.camera}")
 
+    tracker = CardTracker()
     window_name = "TCG Card Demo (press q to quit)"
     try:
         while True:
@@ -208,6 +299,7 @@ def main() -> None:
             result = detector(preview, conf=args.yolo_confidence, verbose=False)[0]
             if result.boxes is not None and result.masks is not None:
                 confidences = result.boxes.conf.detach().cpu().numpy()
+                detections = []  # (quad, gallery_index, similarity) for this frame's successfully rectified cards
                 for polygon, confidence in zip(result.masks.xy, confidences):
                     if float(confidence) < args.yolo_confidence:
                         continue
@@ -218,18 +310,37 @@ def main() -> None:
                         continue
                     card, quad = rectified
                     gallery_index, similarity = closest_card(embedding_model, card, gallery_embeddings)
-                    accepted = similarity >= args.embedding_similarity
-                    if accepted:
-                        card_id = gallery_ids[gallery_index]
-                        card_data = metadata.get(card_id, {})
-                        text = " | ".join([
-                            str(card_data.get("name", card_id)),
-                            str(card_data.get("set", "Unknown set")),
-                            f"#{card_data.get('localId', '?')}",
-                        ])
-                    else:
-                        text = ""
-                    draw_label(preview, quad, text, accepted)
+                    detections.append((quad, gallery_index, similarity))
+
+                if detections:
+                    # Match each detection to a track via its centroid so identifications can be
+                    # accumulated for the same physical card slot across frames.
+                    centroids = [quad.mean(axis=0) for quad, _, _ in detections]
+                    max_track_distance = MAX_TRACK_DISTANCE_FRACTION * preview.shape[0]
+                    tracks = tracker.update(centroids, max_track_distance)
+
+                    for (quad, gallery_index, similarity), track in zip(detections, tracks):
+                        # Only frames confident enough on their own contribute a vote, keeping
+                        # noisy single-frame misreads from swaying the tally.
+                        if similarity >= args.embedding_similarity:
+                            track.add_vote(gallery_index)
+
+                        top_index, top_count, total_votes = track.top_vote()
+                        accepted = (
+                            total_votes >= args.min_votes
+                            and top_count > args.min_vote_share * total_votes
+                        )
+                        if accepted:
+                            card_id = gallery_ids[top_index]
+                            card_data = metadata.get(card_id, {})
+                            text = " | ".join([
+                                str(card_data.get("name", card_id)),
+                                str(card_data.get("set", "Unknown set")),
+                                f"#{card_data.get('localId', '?')}",
+                            ])
+                        else:
+                            text = ""
+                        draw_label(preview, quad, text, accepted)
 
             cv2.imshow(window_name, preview)
             if cv2.waitKey(1) & 0xFF == ord("q"):
