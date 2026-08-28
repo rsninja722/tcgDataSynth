@@ -12,6 +12,8 @@ An experiment in leveraging agentic workflows to create programmatically generat
 demo using a yolo segmentation model and mobilenet embedding model both fine tuned entirely on synthetic data
 
 
+https://github.com/user-attachments/assets/ab6a8b3c-734d-48dd-806e-911d610a3afc
+
 
 ## Blender Setup
 
