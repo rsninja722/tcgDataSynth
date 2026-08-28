@@ -88,6 +88,8 @@ and prevents any later worker from starting. Completed pairs are in `out/images`
 `out/labels`; optional segmentation files are written to `out/labels_yolo` with matching
 `<card_id>|<holo_tag>` rows in `out/extra_label`. `out/manifest.jsonl` makes resume
 numbering deterministic and gap-safe. `out/card_cache` is removed after every worker.
+If a Blender worker fails, the GUI records that seed as skipped in the manifest and
+continues with the next seed instead of retrying it.
 Rare card instances whose finite-box corner refraction cannot be solved use their direct
 pre-refraction polygon for labels/occlusion and are listed in `out/refraction_failures.txt`.
 

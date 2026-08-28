@@ -12,8 +12,9 @@ if _ROOT not in sys.path:
 
 import config  # noqa: E402
 from rules.generation import (ResumeError, append_completed_pair,  # noqa: E402
-                              append_refraction_failures, pair_paths,
-                              resume_next_index, seed_for_index, stem_for_index)
+                               append_refraction_failures, pair_paths,
+                               record_failed_seed, resume_next_index,
+                               seed_for_index, stem_for_index)
 
 
 def _output(root: str) -> config.OutputLayout:
@@ -105,6 +106,67 @@ def test_manifest_mismatch_is_rejected():
             pass
         else:
             raise AssertionError("manifest seed mismatch must fail resume")
+
+
+def test_failed_seed_is_persistently_skipped_and_later_outputs_can_have_gaps():
+    with tempfile.TemporaryDirectory() as d:
+        output = _output(d)
+        assert record_failed_seed(output, 100, 4, 0, "render failed") == "skipped"
+        assert resume_next_index(output, 100, 4) == 1
+
+        second = pair_paths(output, 100, 1)
+        _write_pair(second)
+        append_completed_pair(output, second)
+        assert resume_next_index(output, 100, 4) == 2
+
+        with open(os.path.join(d, output.manifest_name), encoding="utf-8") as handle:
+            records = [json.loads(line) for line in handle if line.strip()]
+        assert records[0] == {
+            "index": 0, "seed": 100, "stem": "000000_seed100",
+            "status": "skipped", "error": "render failed"}
+        assert records[1]["index"] == 1
+
+
+def test_failed_seed_removes_partial_files_but_recovers_complete_pair():
+    with tempfile.TemporaryDirectory() as d:
+        output = _output(d)
+        first = pair_paths(output, 200, 0)
+        os.makedirs(os.path.dirname(first.label_path), exist_ok=True)
+        with open(first.label_path, "w", encoding="utf-8") as handle:
+            handle.write("partial")
+        assert record_failed_seed(output, 200, 2, 0, "partial publish") == "skipped"
+        assert not os.path.exists(first.label_path)
+
+    with tempfile.TemporaryDirectory() as d:
+        output = _output(d)
+        first = pair_paths(output, 300, 0)
+        _write_pair(first)
+        assert record_failed_seed(output, 300, 2, 0, "late failure") == "recovered"
+        assert resume_next_index(output, 300, 2) == 1
+        with open(os.path.join(d, output.manifest_name), encoding="utf-8") as handle:
+            record = json.loads(handle.readline())
+        assert record["recovered"] is True
+        assert record.get("status") != "skipped"
+
+
+def test_failed_seed_removes_staging_files_and_resume_ignores_them():
+    with tempfile.TemporaryDirectory() as d:
+        output = _output(d)
+        first = pair_paths(output, 400, 0)
+        stages = []
+        for path, role in ((first.image_path, "raw"), (first.image_path, "image"),
+                           (first.label_path, "label"), (first.yolo_label_path, "yolo"),
+                           (first.extra_label_path, "extra")):
+            base, extension = os.path.splitext(path)
+            staged = f"{base}.postfx-{role}{extension}"
+            os.makedirs(os.path.dirname(staged), exist_ok=True)
+            with open(staged, "wb") as handle:
+                handle.write(b"partial")
+            stages.append(staged)
+        assert resume_next_index(output, 400, 2) == 0
+        assert record_failed_seed(output, 400, 2, 0, "abrupt exit") == "skipped"
+        assert not any(os.path.exists(path) for path in stages)
+        assert resume_next_index(output, 400, 2) == 1
 
 
 def test_yolo_resume_requires_both_synchronized_optional_files():

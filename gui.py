@@ -20,7 +20,7 @@ if _ROOT not in sys.path:
 
 import config  # noqa: E402
 from rules import combinations  # noqa: E402
-from rules.generation import resume_next_index  # noqa: E402
+from rules.generation import record_failed_seed, resume_next_index  # noqa: E402
 
 
 _LIST_OPTIONS = {
@@ -142,8 +142,12 @@ class GeneratorGui:
         self.start_button.pack(side=tk.LEFT)
         self.pause_button = ttk.Button(actions, text="Pause", command=self._pause, state=tk.DISABLED)
         self.pause_button.pack(side=tk.LEFT, padx=6)
-        ttk.Button(actions, text="Save Settings", command=self._save_settings).pack(side=tk.LEFT)
-        ttk.Button(actions, text="Reload Config", command=self._load_config).pack(side=tk.LEFT, padx=6)
+        self.save_button = ttk.Button(
+            actions, text="Save Settings", command=self._save_settings)
+        self.save_button.pack(side=tk.LEFT)
+        self.reload_button = ttk.Button(
+            actions, text="Reload Config", command=self._load_config)
+        self.reload_button.pack(side=tk.LEFT, padx=6)
         self.status = tk.StringVar(value="Ready")
         ttk.Label(actions, textvariable=self.status).pack(side=tk.RIGHT)
         self.log = tk.Text(outer, height=8, state=tk.DISABLED, wrap=tk.WORD)
@@ -240,6 +244,8 @@ class GeneratorGui:
         self.pause_requested.clear()
         self.start_button.configure(state=tk.DISABLED)
         self.pause_button.configure(state=tk.NORMAL)
+        self.save_button.configure(state=tk.DISABLED)
+        self.reload_button.configure(state=tk.DISABLED)
         self.status.set(f"Starting index {next_index}")
         self.thread = threading.Thread(target=self._run_workers, args=(executable,), daemon=True)
         self.thread.start()
@@ -264,7 +270,8 @@ class GeneratorGui:
                 if self.pause_requested.is_set():
                     self.events.put(("finished", "Paused between completed pairs"))
                     return
-                command = [executable, "-b", "-P", self.worker_path, "--", "--index",
+                command = [executable, "-b", "--python-exit-code", "1",
+                           "-P", self.worker_path, "--", "--index",
                            str(next_index), "--config", self.config_path,
                            "--output-root", self.output.root]
                 self.events.put(("status", f"Rendering index {next_index}"))
@@ -276,9 +283,30 @@ class GeneratorGui:
                     self.events.put(("log", line.rstrip()))
                 return_code = self.process.wait()
                 self.process = None
+                failure = None
                 if return_code != 0:
-                    self.events.put(("error", f"Blender worker index {next_index} exited {return_code}"))
-                    return
+                    failure = f"Blender worker index {next_index} exited {return_code}"
+                else:
+                    advanced_index = resume_next_index(
+                        self.output, settings["base_seed"], settings["count"],
+                        require_yolo_segmentation=settings["export_yolo_segmentation"])
+                    if advanced_index <= next_index:
+                        failure = (
+                            f"Blender worker index {next_index} exited successfully "
+                            "without publishing output")
+                if failure is not None:
+                    outcome = record_failed_seed(
+                        self.output, settings["base_seed"], settings["count"], next_index,
+                        failure,
+                        require_yolo_segmentation=settings["export_yolo_segmentation"])
+                    if outcome == "recovered":
+                        self.events.put((
+                            "log", f"{failure}; recovered its published output and continuing"))
+                    else:
+                        seed = settings["base_seed"] + next_index
+                        self.events.put((
+                            "log", f"{failure}; skipped seed {seed} and continuing"))
+                    continue
                 self.events.put(("status", f"Completed index {next_index}"))
                 if self.pause_requested.is_set():
                     self.events.put(("finished", "Paused after completed image/label pair"))
@@ -316,6 +344,8 @@ class GeneratorGui:
         self.process = None
         self.start_button.configure(state=tk.NORMAL)
         self.pause_button.configure(state=tk.DISABLED)
+        self.save_button.configure(state=tk.NORMAL)
+        self.reload_button.configure(state=tk.NORMAL)
 
     def _is_running(self) -> bool:
         return self.thread is not None and self.thread.is_alive()

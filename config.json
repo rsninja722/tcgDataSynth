@@ -1,7 +1,7 @@
 {
   "_comment": "Central tuning config for tcgDataSynth. Edit and re-run; scripts read this at runtime. Each scene type has its OWN params under 'layouts'.",
   "blender_executable": "C:\\Program Files\\Blender Foundation\\Blender 5.0\\blender.exe",
-  "table_texture_dir": "",
+  "table_texture_dir": "C:/Code/React/CollectiblesApp/src/ai_dev/datasets/YOLO_training/backgrounds/val2017",
   "holo": {
     "_comment": "Holo diffraction-flash. angle_gain: flash-band motion vs view angle. pattern_gain: spatial break-up. sharpness: flash threshold. emit: peak flash brightness. darken: base darkening between flashes.",
     "angle_gain": 12.0,
@@ -105,13 +105,14 @@
   },
   "generation": {
     "count": 2000,
-    "base_seed": 1660,
-    "export_yolo_segmentation": false,
+    "base_seed": 865531,
+    "export_yolo_segmentation": true,
     "enabled_options": {
       "layouts": [
         "table",
         "floating",
         "binder",
+        "display_case",
         "hand",
         "stack"
       ],
@@ -135,6 +136,7 @@
         "holo"
       ],
       "holo_regions": [
+        "entire",
         "picture",
         "reverse"
       ],
@@ -177,7 +179,7 @@
         "motion_blur"
       ],
       "back_to_camera_prob": 0.05,
-      "cardless_scene_prob": 0.0
+      "cardless_scene_prob": 0.1
     }
   },
   "layouts": {

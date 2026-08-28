@@ -108,6 +108,20 @@ def _validate_record(record: dict[str, Any], paths: PairPaths,
                 f"expected {expected!r}")
 
 
+def _validate_skipped_record(record: dict[str, Any], paths: PairPaths) -> None:
+    required = {
+        "index": paths.index,
+        "seed": paths.seed,
+        "stem": paths.stem,
+        "status": "skipped",
+    }
+    for key, expected in required.items():
+        if record.get(key) != expected:
+            raise ResumeError(
+                f"Skipped manifest record {paths.index} has {key}={record.get(key)!r}; "
+                f"expected {expected!r}")
+
+
 def _pair_file_stems(output: config.OutputLayout) -> dict[str, set[str]]:
     root = os.path.abspath(output.root)
     image_dir = os.path.join(root, output.images_subdir)
@@ -116,7 +130,8 @@ def _pair_file_stems(output: config.OutputLayout) -> dict[str, set[str]]:
         if not os.path.isdir(directory):
             return set()
         return {name[:-len(extension)] for name in os.listdir(directory)
-                if name.endswith(extension) and os.path.isfile(os.path.join(directory, name))}
+                if name.endswith(extension) and ".postfx-" not in name
+                and os.path.isfile(os.path.join(directory, name))}
 
     return {
         "image": stems(image_dir, ".png"),
@@ -161,6 +176,68 @@ def append_completed_pair(output: config.OutputLayout, paths: PairPaths,
         handle.write(json.dumps(record, sort_keys=True) + "\n")
         handle.flush()
         os.fsync(handle.fileno())
+
+
+def record_failed_seed(output: config.OutputLayout, base_seed: int, count: int,
+                       index: int, error: str,
+                       require_yolo_segmentation: bool = False) -> str:
+    """Persist a failed attempt so resume advances to the next seed.
+
+    If the worker published a complete bundle before exiting, normal resume recovery
+    records it as completed instead. Partial final artifacts for this failed index are
+    removed before the skip is recorded.
+    """
+    paths = pair_paths(output, base_seed, index)
+    staged_paths = []
+    for path, role in (
+            (paths.image_path, "raw"), (paths.image_path, "image"),
+            (paths.label_path, "label"), (paths.yolo_label_path, "yolo"),
+            (paths.extra_label_path, "extra")):
+        base, extension = os.path.splitext(path)
+        staged_paths.append(f"{base}.postfx-{role}{extension}")
+    for path in staged_paths:
+        if os.path.isfile(path):
+            os.remove(path)
+
+    required = [paths.image_path, paths.label_path]
+    if require_yolo_segmentation:
+        required.extend((paths.yolo_label_path, paths.extra_label_path))
+    if all(os.path.isfile(path) for path in required):
+        next_index = resume_next_index(
+            output, base_seed, count,
+            require_yolo_segmentation=require_yolo_segmentation)
+        if next_index > index:
+            return "recovered"
+
+    for path in (paths.image_path, paths.label_path,
+                 paths.yolo_label_path, paths.extra_label_path):
+        if os.path.isfile(path):
+            os.remove(path)
+    next_index = resume_next_index(
+        output, base_seed, count,
+        require_yolo_segmentation=require_yolo_segmentation)
+    if next_index != index:
+        raise ResumeError(
+            f"Cannot skip failed index {index}; resume state requires {next_index}")
+
+    records = _read_manifest(output)
+    if len(records) != index:
+        raise ResumeError(
+            f"Cannot record skipped index {index}; manifest has {len(records)} records")
+    record = {
+        "index": paths.index,
+        "seed": paths.seed,
+        "stem": paths.stem,
+        "status": "skipped",
+        "error": str(error),
+    }
+    manifest_path = _manifest_path(output)
+    os.makedirs(os.path.dirname(manifest_path), exist_ok=True)
+    with open(manifest_path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    return "skipped"
 
 
 def append_refraction_failures(output: config.OutputLayout, paths: PairPaths,
@@ -217,16 +294,30 @@ def resume_next_index(output: config.OutputLayout, base_seed: int, count: int,
     if unknown:
         raise ResumeError(f"Output contains stems outside this generation request: {sorted(unknown)}")
 
-    present = [index for index, paths in enumerate(expected) if paths.stem in image_stems]
-    if present != list(range(len(present))):
-        raise ResumeError(f"Output indices are not a contiguous prefix: {present}")
     records = _read_manifest(output)
-    if len(records) > len(present):
-        raise ResumeError("Manifest has more records than completed output pairs")
+    if len(records) > count:
+        raise ResumeError("Manifest has more records than requested generation attempts")
     for index, record in enumerate(records):
-        _validate_record(record, expected[index], require_yolo_segmentation)
-    for index in range(len(records), len(present)):
+        paths = expected[index]
+        if record.get("status") == "skipped":
+            _validate_skipped_record(record, paths)
+            if paths.stem in image_stems:
+                raise ResumeError(f"Skipped index {index} unexpectedly has output files")
+        else:
+            _validate_record(record, paths, require_yolo_segmentation)
+            if paths.stem not in image_stems:
+                raise ResumeError(f"Completed manifest index {index} is missing output files")
+
+    present_unrecorded = [
+        index for index in range(len(records), count)
+        if expected[index].stem in image_stems]
+    recoverable = list(range(len(records), len(records) + len(present_unrecorded)))
+    if present_unrecorded != recoverable:
+        raise ResumeError(
+            f"Unrecorded output indices are not contiguous after the manifest: "
+            f"{present_unrecorded}")
+    for index in present_unrecorded:
         append_completed_pair(
             output, expected[index], recovered=True,
             require_yolo_segmentation=require_yolo_segmentation)
-    return len(present)
+    return len(records) + len(present_unrecorded)

@@ -65,6 +65,8 @@ Requested dataset-generation extensions implemented; Blender t22 acceptance pend
   and a hand is sampled around it with 25% probability.
 - A single GUI probability controls intentional cardless variants for every layout.
 - Each standalone worker removes `out/card_cache` in a `finally` block.
+- Failed GUI workers are persisted as skipped manifest attempts so resume advances to
+  the next seed; fully published outputs are recovered instead of skipped.
 
 ## Active Label Contract
 
@@ -97,7 +99,7 @@ metadata in a sibling directory. Full details are in `LABEL_FORMAT.md`.
   positions and sun angles are interpreted in a camera-relative front-hemisphere basis.
 - The final t17 shadow shape and midpoint placement were visually accepted by the user
   under Blender 5.0.0. The later configurable opacity/softness touch-up awaits t21 review.
-- Container validation passes all 157 unit tests,
+- Container validation passes all 160 unit tests,
   `compileall`, and `git diff --check`.
 - The t21 Blender 5.0 touch-up acceptance script has not yet been run in this container,
   which has no Blender.
